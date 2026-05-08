@@ -33,6 +33,39 @@ class BloodNeedRequest {
   final int sortRank;
   final DateTime updatedAt;
 
+  BloodNeedRequest copyWith({
+    String? patientName,
+    String? summary,
+    String? bloodGroup,
+    String? hospital,
+    String? date,
+    String? time,
+    String? requester,
+    String? phone,
+    int? units,
+    NeedUrgency? urgency,
+    NeedStatus? status,
+    int? sortRank,
+    DateTime? updatedAt,
+  }) {
+    return BloodNeedRequest(
+      id: id,
+      patientName: patientName ?? this.patientName,
+      summary: summary ?? this.summary,
+      bloodGroup: bloodGroup ?? this.bloodGroup,
+      hospital: hospital ?? this.hospital,
+      date: date ?? this.date,
+      time: time ?? this.time,
+      requester: requester ?? this.requester,
+      phone: phone ?? this.phone,
+      units: units ?? this.units,
+      urgency: urgency ?? this.urgency,
+      status: status ?? this.status,
+      sortRank: sortRank ?? this.sortRank,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   Map<String, Object?> toJson() {
     return {
       'id': id,

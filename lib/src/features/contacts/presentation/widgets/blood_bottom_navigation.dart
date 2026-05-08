@@ -7,16 +7,14 @@ class BloodBottomNavigation extends StatelessWidget {
     required this.selectedTab,
     required this.onHome,
     required this.onContacts,
-    required this.onRequests,
-    required this.onAlerts,
+    required this.onNeeds,
     required this.onProfile,
   });
 
   final AppTab selectedTab;
   final VoidCallback onHome;
   final VoidCallback onContacts;
-  final VoidCallback onRequests;
-  final VoidCallback onAlerts;
+  final VoidCallback onNeeds;
   final VoidCallback onProfile;
 
   @override
@@ -25,10 +23,6 @@ class BloodBottomNavigation extends StatelessWidget {
       height: 82,
       color: Colors.white,
       surfaceTintColor: Colors.transparent,
-      shape: selectedTab == AppTab.home
-          ? const CircularNotchedRectangle()
-          : null,
-      notchMargin: selectedTab == AppTab.home ? 8 : 0,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
@@ -44,23 +38,16 @@ class BloodBottomNavigation extends StatelessWidget {
             selected: selectedTab == AppTab.contacts,
             onTap: onContacts,
           ),
-          if (selectedTab == AppTab.home) const SizedBox(width: 46),
           NavItem(
-            icon: selectedTab == AppTab.contacts
-                ? Icons.water_drop_outlined
-                : Icons.notifications_none,
-            label: 'Requests',
-            onTap: onRequests,
+            icon: Icons.water_drop_outlined,
+            label: 'Needs',
+            selected: selectedTab == AppTab.needs,
+            onTap: onNeeds,
           ),
-          if (selectedTab == AppTab.contacts)
-            NavItem(
-              icon: Icons.notifications_none,
-              label: 'Alerts',
-              onTap: onAlerts,
-            ),
           NavItem(
             icon: Icons.person_outline,
             label: 'Profile',
+            selected: selectedTab == AppTab.profile,
             onTap: onProfile,
           ),
         ],

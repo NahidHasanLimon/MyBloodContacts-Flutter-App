@@ -24,7 +24,7 @@ enum ContactFilter {
   final IconData icon;
 }
 
-enum AppTab { home, contacts }
+enum AppTab { home, contacts, needs, profile }
 
 enum AvailabilityFilter {
   all('All Status'),
@@ -32,6 +32,26 @@ enum AvailabilityFilter {
   unavailable('Unavailable');
 
   const AvailabilityFilter(this.label);
+
+  final String label;
+}
+
+enum DonorAvailability {
+  available('Available', 'Can donate now'),
+  unavailable('Unavailable', 'Currently unavailable');
+
+  const DonorAvailability(this.label, this.statusText);
+
+  final String label;
+  final String statusText;
+}
+
+enum ContactsSortOption {
+  name('Sort by name'),
+  date('Sort by date'),
+  lastDonationDate('Last donation date');
+
+  const ContactsSortOption(this.label);
 
   final String label;
 }

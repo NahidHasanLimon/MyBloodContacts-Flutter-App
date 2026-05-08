@@ -4,8 +4,10 @@ import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_stats.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/pages/donor_details_page.dart';
+import 'package:blood_contacts/src/features/contacts/presentation/pages/need_details_page.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/pages/new_need_page.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/widgets/contact_widgets.dart';
+import 'package:blood_contacts/src/features/contacts/presentation/widgets/profile_page.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart' as sqflite;
@@ -265,10 +267,41 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     await _store?.saveNeeds(_needs);
   }
 
+  Future<void> _openNeedDetails(BloodNeedRequest need) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => NeedDetailsPage(
+          need: need,
+          contacts: _contacts,
+          onChanged: _updateNeed,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateNeed(BloodNeedRequest need) async {
+    setState(() {
+      final index = _needs.indexWhere((existing) => existing.id == need.id);
+      if (index == -1) return;
+      _needs = [..._needs]..[index] = need;
+    });
+    await _store?.saveNeeds(_needs);
+  }
+
   void _showComingSoon(String label) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label will be connected in a later step.')),
     );
+  }
+
+  void _syncData() {
+    final folder = _driveFolder?.trim();
+    final message = folder == null || folder.isEmpty
+        ? 'Connect Google Drive before syncing data.'
+        : 'Sync data will be connected in a later step.';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _selectTab(AppTab tab) {
@@ -344,7 +377,24 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
         onEditContact: _openContactForm,
         onDeleteContact: _confirmDeleteContact,
       ),
-      AppTab.needs => NeedsListPage(needs: _needs),
+      AppTab.needs => NeedsListPage(
+        needs: _needs,
+        onOpenDetails: _openNeedDetails,
+      ),
+      AppTab.profile => ProfilePage(
+        driveFolder: _driveFolder,
+        onConnectDrive: _saveDriveFolder,
+        onSyncData: _syncData,
+        onAutoBackup: () => _showComingSoon('Auto backup'),
+        onBackupHistory: () => _showComingSoon('Backup history'),
+        onAppearance: () => _showComingSoon('App appearance'),
+        onNotifications: () => _showComingSoon('Notifications'),
+        onAppLock: () => _showComingSoon('App lock'),
+        onPrivacy: () => _showComingSoon('Privacy & data'),
+        onPermissions: () => _showComingSoon('Permissions'),
+        onAbout: () => _showComingSoon('About Blood Contacts'),
+        onRate: () => _showComingSoon('Rate us'),
+      ),
     };
 
     return Scaffold(
@@ -380,7 +430,7 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
         onHome: () => _selectTab(AppTab.home),
         onContacts: () => _selectTab(AppTab.contacts),
         onNeeds: () => _selectTab(AppTab.needs),
-        onProfile: () => _showComingSoon('Profile'),
+        onProfile: () => _selectTab(AppTab.profile),
       ),
     );
   }

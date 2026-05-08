@@ -8,9 +8,14 @@ enum NeedStatusFilter { all, open, inProgress, fulfilled, cancelled }
 enum NeedSortOption { newest, oldest, unitsHigh }
 
 class NeedsListPage extends StatefulWidget {
-  const NeedsListPage({super.key, required this.needs});
+  const NeedsListPage({
+    super.key,
+    required this.needs,
+    required this.onOpenDetails,
+  });
 
   final List<BloodNeedRequest> needs;
+  final ValueChanged<BloodNeedRequest> onOpenDetails;
 
   @override
   State<NeedsListPage> createState() => _NeedsListPageState();
@@ -188,7 +193,10 @@ class _NeedsListPageState extends State<NeedsListPage> {
                   itemBuilder: (context, index) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: NeedRequestCard(need: needs[index]),
+                      child: NeedRequestCard(
+                        need: needs[index],
+                        onTap: () => widget.onOpenDetails(needs[index]),
+                      ),
                     );
                   },
                 ),
@@ -804,167 +812,166 @@ class _NeedSortButton extends StatelessWidget {
 }
 
 class NeedRequestCard extends StatelessWidget {
-  const NeedRequestCard({super.key, required this.need});
+  const NeedRequestCard({super.key, required this.need, required this.onTap});
 
   final BloodNeedRequest need;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final urgencyColor = need.urgency.color;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xffececf1)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x12000000),
-            blurRadius: 12,
-            offset: Offset(0, 5),
-          ),
-        ],
+        side: const BorderSide(color: Color(0xffececf1)),
       ),
+      elevation: 2,
+      shadowColor: const Color(0x12000000),
       clipBehavior: Clip.antiAlias,
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(width: 3, color: urgencyColor),
-            Expanded(
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _BloodDropBadge(need: need),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+      child: InkWell(
+        onTap: onTap,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(width: 3, color: urgencyColor),
+              Expanded(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _BloodDropBadge(need: need),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  need.patientName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Color(0xff101225),
+                                    fontSize: 16,
+                                    height: 1.1,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  need.summary,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Color(0xff343741),
+                                    fontSize: 14,
+                                    height: 1.2,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                _NeedInfoLine(
+                                  icon: Icons.business_outlined,
+                                  text: need.hospital,
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 14,
+                                  runSpacing: 8,
+                                  children: [
+                                    _NeedInfoItem(
+                                      icon: Icons.calendar_today_outlined,
+                                      text: need.date,
+                                    ),
+                                    _NeedInfoItem(
+                                      icon: Icons.schedule,
+                                      text: need.time,
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              Text(
-                                need.patientName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Color(0xff101225),
-                                  fontSize: 16,
-                                  height: 1.1,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
+                              _UnitsBadge(units: need.units),
+                              const SizedBox(height: 12),
+                              _StatusBadge(status: need.status),
                               const SizedBox(height: 6),
-                              Text(
-                                need.summary,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Color(0xff343741),
-                                  fontSize: 14,
-                                  height: 1.2,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              _NeedInfoLine(
-                                icon: Icons.business_outlined,
-                                text: need.hospital,
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 14,
-                                runSpacing: 8,
-                                children: [
-                                  _NeedInfoItem(
-                                    icon: Icons.calendar_today_outlined,
-                                    text: need.date,
-                                  ),
-                                  _NeedInfoItem(
-                                    icon: Icons.schedule,
-                                    text: need.time,
-                                  ),
-                                ],
+                              const Icon(
+                                Icons.more_vert,
+                                color: Color(0xff24283a),
+                                size: 24,
                               ),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            _UnitsBadge(units: need.units),
-                            const SizedBox(height: 12),
-                            _StatusBadge(status: need.status),
-                            const SizedBox(height: 6),
-                            const Icon(
-                              Icons.more_vert,
-                              color: Color(0xff24283a),
-                              size: 24,
-                            ),
-                          ],
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  Container(height: 1, color: const Color(0xffeeeef3)),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.person_outline,
-                          color: Color(0xff343741),
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            need.requester,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xff343741),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const Text(
-                          ' • ',
-                          style: TextStyle(
+                    Container(height: 1, color: const Color(0xffeeeef3)),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.person_outline,
                             color: Color(0xff343741),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
+                            size: 18,
                           ),
-                        ),
-                        const Icon(
-                          Icons.phone_outlined,
-                          color: Color(0xff343741),
-                          size: 17,
-                        ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            need.phone,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xff343741),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              need.requester,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xff343741),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                          const Text(
+                            ' • ',
+                            style: TextStyle(
+                              color: Color(0xff343741),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const Icon(
+                            Icons.phone_outlined,
+                            color: Color(0xff343741),
+                            size: 17,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              need.phone,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xff343741),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
