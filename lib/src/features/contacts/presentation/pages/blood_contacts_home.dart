@@ -1,13 +1,19 @@
 import 'package:blood_contacts/src/features/contacts/data/contacts_store.dart';
+import 'package:blood_contacts/src/features/contacts/domain/blood_need_request.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_stats.dart';
+import 'package:blood_contacts/src/features/contacts/presentation/pages/donor_details_page.dart';
+import 'package:blood_contacts/src/features/contacts/presentation/pages/new_need_page.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/widgets/contact_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart' as sqflite;
 
 class BloodContactsHome extends StatefulWidget {
-  const BloodContactsHome({super.key});
+  const BloodContactsHome({super.key, this.databaseFactory});
+
+  final sqflite.DatabaseFactory? databaseFactory;
 
   @override
   State<BloodContactsHome> createState() => _BloodContactsHomeState();
@@ -21,9 +27,10 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
   AppTab _selectedTab = AppTab.home;
   String _contactsQuery = '';
   String _contactsGroupFilter = 'All Groups';
-  AvailabilityFilter _contactsAvailabilityFilter = AvailabilityFilter.all;
-  String _contactsAreaFilter = 'All Areas';
+  bool _contactsAvailableOnly = false;
   bool _contactsNearbyOnly = false;
+  ContactsSortOption _contactsSortOption = ContactsSortOption.name;
+  List<BloodNeedRequest> _needs = [];
   String? _driveFolder;
   bool _loading = true;
 
@@ -34,15 +41,30 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
   }
 
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final store = ContactsStore(prefs);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final store = ContactsStore(
+        prefs,
+        databaseFactory: widget.databaseFactory,
+      );
+      await store.init();
+      final contacts = await store.loadContacts();
+      final needs = await store.loadNeeds();
 
-    setState(() {
-      _store = store;
-      _contacts = store.loadContacts();
-      _driveFolder = store.loadDriveFolder();
-      _loading = false;
-    });
+      if (!mounted) return;
+      setState(() {
+        _store = store;
+        _contacts = contacts;
+        _needs = needs;
+        _driveFolder = store.loadDriveFolder();
+        _loading = false;
+      });
+    } catch (error, stackTrace) {
+      debugPrint('Failed to load contacts store: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
   }
 
   Future<void> _saveContacts(List<BloodContact> contacts) async {
@@ -66,21 +88,10 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     }).toList();
   }
 
-  List<String> get _areaFilters {
-    final areas =
-        _contacts
-            .map((contact) => contact.area)
-            .where((area) => area != 'Local contact')
-            .toSet()
-            .toList()
-          ..sort();
-    return ['All Areas', ...areas];
-  }
-
   List<BloodContact> get _filteredContacts {
     final query = _contactsQuery.toLowerCase().trim();
 
-    return _contacts.where((contact) {
+    final filtered = _contacts.where((contact) {
       final matchesSearch =
           query.isEmpty ||
           '${contact.name} ${contact.phone} ${contact.area} ${contact.bloodGroup}'
@@ -89,22 +100,25 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
       final matchesGroup =
           _contactsGroupFilter == 'All Groups' ||
           contact.bloodGroup == _contactsGroupFilter;
-      final matchesStatus = switch (_contactsAvailabilityFilter) {
-        AvailabilityFilter.all => true,
-        AvailabilityFilter.available => contact.isAvailable,
-        AvailabilityFilter.unavailable => !contact.isAvailable,
-      };
-      final matchesArea =
-          _contactsAreaFilter == 'All Areas' ||
-          contact.area == _contactsAreaFilter;
+      final matchesAvailability =
+          !_contactsAvailableOnly || contact.isAvailable;
       final matchesNearby = !_contactsNearbyOnly || contact.isNearby;
 
       return matchesSearch &&
           matchesGroup &&
-          matchesStatus &&
-          matchesArea &&
+          matchesAvailability &&
           matchesNearby;
     }).toList();
+
+    return filtered..sort(_sortContactsForContactsPage);
+  }
+
+  int _sortContactsForContactsPage(BloodContact a, BloodContact b) {
+    return switch (_contactsSortOption) {
+      ContactsSortOption.name => sortContacts(a, b),
+      ContactsSortOption.date => b.updatedAt.compareTo(a.updatedAt),
+      ContactsSortOption.lastDonationDate => b.updatedAt.compareTo(a.updatedAt),
+    };
   }
 
   ContactStats get _stats => ContactStats.fromContacts(_contacts);
@@ -114,8 +128,8 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      showDragHandle: true,
-      builder: (context) => ContactFormSheet(contact: contact),
+      backgroundColor: Colors.transparent,
+      builder: (context) => AddBloodContactBottomSheet(contact: contact),
     );
 
     if (result == null) return;
@@ -132,11 +146,76 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     }
 
     await _saveContacts(nextContacts);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Blood contact saved successfully.')),
+      );
+    }
   }
 
   Future<void> _deleteContact(BloodContact contact) async {
     await _saveContacts(
       _contacts.where((existing) => existing.id != contact.id).toList(),
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Blood contact deleted successfully.')),
+      );
+    }
+  }
+
+  Future<bool> _confirmDeleteContact(
+    BloodContact contact, {
+    BuildContext? dialogContext,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: dialogContext ?? context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete contact?'),
+        content: const Text(
+          'This blood contact will be removed from your saved donor list.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _deleteContact(contact);
+      return true;
+    }
+
+    return false;
+  }
+
+  Future<void> _openContactDetails(BloodContact contact) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (detailsContext) => DonorDetailsPage(
+          contact: contact,
+          onEdit: () async {
+            Navigator.pop(detailsContext);
+            await _openContactForm(contact);
+          },
+          onDelete: () async {
+            final deleted = await _confirmDeleteContact(
+              contact,
+              dialogContext: detailsContext,
+            );
+            if (deleted && detailsContext.mounted) {
+              Navigator.pop(detailsContext);
+            }
+          },
+        ),
+      ),
     );
   }
 
@@ -173,14 +252,17 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     setState(() => _driveFolder = folder);
   }
 
-  void _showImportNotice() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Native contact import is the next integration step; local entries work now.',
-        ),
-      ),
+  Future<void> _openNewNeed() async {
+    final need = await Navigator.of(context).push<BloodNeedRequest>(
+      MaterialPageRoute(builder: (context) => const NewNeedPage()),
     );
+    if (need == null) return;
+
+    setState(() {
+      _needs = [need, ..._needs];
+      _selectedTab = AppTab.needs;
+    });
+    await _store?.saveNeeds(_needs);
   }
 
   void _showComingSoon(String label) {
@@ -210,74 +292,94 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
         selectedFilter: _selectedFilter,
         driveFolder: _driveFolder,
         onAdd: () => _openContactForm(),
-        onImport: _showImportNotice,
+        onNeed: _openNewNeed,
         onDriveFolder: _saveDriveFolder,
         onBloodGroupSelected: (group) {
           setState(() {
             _selectedBloodGroup = _selectedBloodGroup == group ? null : group;
           });
         },
-        onFilterChanged: (filter) => setState(() => _selectedFilter = filter),
+        onFilterChanged: (filter) {
+          setState(() {
+            _selectedFilter = filter;
+            if (filter == ContactFilter.all) {
+              _selectedBloodGroup = null;
+            }
+          });
+        },
         onViewAll: () => _selectTab(AppTab.contacts),
-        onEditContact: _openContactForm,
-        onDeleteContact: _deleteContact,
+        onEditContact: _openContactDetails,
+        onDeleteContact: _confirmDeleteContact,
       ),
       AppTab.contacts => AllContactsPage(
-        stats: stats,
         contacts: _filteredContacts,
+        totalCount: stats.total,
+        availableCount: stats.available,
         query: _contactsQuery,
         selectedGroup: _contactsGroupFilter,
-        selectedAvailability: _contactsAvailabilityFilter,
-        selectedArea: _contactsAreaFilter,
+        availableOnly: _contactsAvailableOnly,
         nearbyOnly: _contactsNearbyOnly,
-        areaOptions: _areaFilters,
+        selectedSort: _contactsSortOption,
         onQueryChanged: (value) => setState(() => _contactsQuery = value),
         onGroupChanged: (value) => setState(() => _contactsGroupFilter = value),
-        onAvailabilityChanged: (value) {
-          setState(() => _contactsAvailabilityFilter = value);
+        onAvailableChanged: (value) {
+          setState(() => _contactsAvailableOnly = value);
         },
-        onAreaChanged: (value) => setState(() => _contactsAreaFilter = value),
         onNearbyChanged: (value) {
           setState(() => _contactsNearbyOnly = value);
         },
+        onSortChanged: (value) => setState(() => _contactsSortOption = value),
         onClearFilters: () {
           setState(() {
             _contactsQuery = '';
             _contactsGroupFilter = 'All Groups';
-            _contactsAvailabilityFilter = AvailabilityFilter.all;
-            _contactsAreaFilter = 'All Areas';
+            _contactsAvailableOnly = false;
             _contactsNearbyOnly = false;
+            _contactsSortOption = ContactsSortOption.name;
           });
         },
         onAdd: () => _openContactForm(),
         onBack: () => _selectTab(AppTab.home),
+        onOpenDetails: _openContactDetails,
         onEditContact: _openContactForm,
-        onDeleteContact: _deleteContact,
+        onDeleteContact: _confirmDeleteContact,
       ),
+      AppTab.needs => NeedsListPage(needs: _needs),
     };
 
     return Scaffold(
       body: body,
-      floatingActionButton: SizedBox(
-        width: _selectedTab == AppTab.contacts ? 72 : null,
-        height: _selectedTab == AppTab.contacts ? 72 : null,
-        child: FloatingActionButton(
-          onPressed: () => _openContactForm(),
-          shape: const CircleBorder(),
-          backgroundColor: const Color(0xffe5161d),
-          foregroundColor: Colors.white,
-          child: const Icon(Icons.add, size: 34),
-        ),
-      ),
-      floatingActionButtonLocation: _selectedTab == AppTab.contacts
-          ? FloatingActionButtonLocation.endFloat
-          : FloatingActionButtonLocation.centerDocked,
+      floatingActionButton: _selectedTab == AppTab.contacts
+          ? SizedBox(
+              width: 72,
+              height: 72,
+              child: FloatingActionButton(
+                onPressed: () => _openContactForm(),
+                shape: const CircleBorder(),
+                backgroundColor: const Color(0xffe5161d),
+                foregroundColor: Colors.white,
+                child: const Icon(Icons.add, size: 34),
+              ),
+            )
+          : _selectedTab == AppTab.needs
+          ? SizedBox(
+              width: 72,
+              height: 72,
+              child: FloatingActionButton(
+                onPressed: _openNewNeed,
+                shape: const CircleBorder(),
+                backgroundColor: const Color(0xffe5161d),
+                foregroundColor: Colors.white,
+                child: const Icon(Icons.add, size: 34),
+              ),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: BloodBottomNavigation(
         selectedTab: _selectedTab,
         onHome: () => _selectTab(AppTab.home),
         onContacts: () => _selectTab(AppTab.contacts),
-        onRequests: () => _showComingSoon('Requests'),
-        onAlerts: () => _showComingSoon('Alerts'),
+        onNeeds: () => _selectTab(AppTab.needs),
         onProfile: () => _showComingSoon('Profile'),
       ),
     );

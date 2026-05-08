@@ -6,5 +6,5 @@ void main() {
 }
 
 class MyApp extends BloodContactsApp {
-  const MyApp({super.key});
+  const MyApp({super.key, super.databaseFactory});
 }

@@ -1,27 +1,123 @@
 import 'dart:convert';
 
+import 'package:blood_contacts/src/features/contacts/domain/blood_need_request.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
+import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart' as sqflite;
 
 class ContactsStore {
-  ContactsStore(this._prefs);
+  ContactsStore(this._prefs, {sqflite.DatabaseFactory? databaseFactory})
+    : _databaseFactory = databaseFactory ?? sqflite.databaseFactory;
 
-  static const _contactsKey = 'blood_contacts.contacts';
+  static const _databaseName = 'blood_contacts.db';
+  static const _databaseVersion = 2;
+  static const _contactsTable = 'contacts';
+  static const _needsTable = 'needs';
+  static const _legacyContactsKey = 'blood_contacts.contacts';
+  static const _legacyContactsMigratedKey =
+      'blood_contacts.contacts_sqlite_migrated';
   static const _driveFolderKey = 'blood_contacts.drive_folder';
 
   final SharedPreferences _prefs;
+  final sqflite.DatabaseFactory _databaseFactory;
+  sqflite.Database? _database;
 
-  List<BloodContact> loadContacts() {
-    final rawContacts = _prefs.getStringList(_contactsKey) ?? [];
-    return rawContacts
-        .map((contact) => BloodContact.fromJson(jsonDecode(contact)))
-        .toList()
-      ..sort(sortContacts);
+  Future<void> init() async {
+    _database = await _openDatabase();
+    await _migrateLegacyContacts();
   }
 
-  Future<void> saveContacts(List<BloodContact> contacts) {
-    final encoded = contacts.map((contact) => jsonEncode(contact.toJson()));
-    return _prefs.setStringList(_contactsKey, encoded.toList());
+  Future<List<BloodContact>> loadContacts() async {
+    final rows = await _db.query(
+      _contactsTable,
+      where: 'deleted_at IS NULL',
+      orderBy: 'LOWER(name) ASC',
+    );
+    return rows.map(_contactFromRow).toList()..sort(sortContacts);
+  }
+
+  Future<void> saveContacts(List<BloodContact> contacts) async {
+    await _db.transaction((txn) async {
+      final existingRows = await txn.query(
+        _contactsTable,
+        columns: ['id'],
+        where: 'deleted_at IS NULL',
+      );
+      final nextIds = contacts.map((contact) => contact.id).toSet();
+
+      for (final row in existingRows) {
+        final id = row['id'] as String;
+        if (!nextIds.contains(id)) {
+          await txn.update(
+            _contactsTable,
+            {
+              'deleted_at': DateTime.now().toIso8601String(),
+              'sync_status': 'pending_delete',
+            },
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        }
+      }
+
+      for (final contact in contacts) {
+        await txn.insert(
+          _contactsTable,
+          _contactToRow(contact),
+          conflictAlgorithm: sqflite.ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
+  Future<List<BloodNeedRequest>> loadNeeds() async {
+    final rows = await _db.query(
+      _needsTable,
+      where: 'deleted_at IS NULL',
+      orderBy: 'sort_rank DESC',
+    );
+
+    return rows.map(_needFromRow).toList()
+      ..sort((a, b) => b.sortRank.compareTo(a.sortRank));
+  }
+
+  Future<void> saveNeeds(
+    List<BloodNeedRequest> needs, {
+    bool markSynced = false,
+  }) async {
+    await _db.transaction((txn) async {
+      final existingRows = await txn.query(
+        _needsTable,
+        columns: ['id'],
+        where: 'deleted_at IS NULL',
+      );
+      final nextIds = needs.map((need) => need.id).toSet();
+
+      for (final row in existingRows) {
+        final id = row['id'] as String;
+        if (!nextIds.contains(id)) {
+          await txn.update(
+            _needsTable,
+            {
+              'deleted_at': DateTime.now().toIso8601String(),
+              'sync_status': 'pending_delete',
+            },
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        }
+      }
+
+      for (final need in needs) {
+        await txn.insert(
+          _needsTable,
+          _needToRow(need, markSynced: markSynced),
+          conflictAlgorithm: sqflite.ConflictAlgorithm.replace,
+        );
+      }
+    });
   }
 
   String? loadDriveFolder() => _prefs.getString(_driveFolderKey);
@@ -29,4 +125,194 @@ class ContactsStore {
   Future<void> saveDriveFolder(String folderName) {
     return _prefs.setString(_driveFolderKey, folderName);
   }
+
+  Future<sqflite.Database> _openDatabase() async {
+    final databasePath = await _databaseFactory.getDatabasesPath();
+    return _databaseFactory.openDatabase(
+      p.join(databasePath, _databaseName),
+      options: sqflite.OpenDatabaseOptions(
+        version: _databaseVersion,
+        onCreate: (db, version) async {
+          await _createSchema(db);
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await _upgradeNeedsSchemaV2(db);
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _createSchema(sqflite.DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE $_contactsTable (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  email TEXT NOT NULL DEFAULT '',
+  photo_path TEXT,
+  photo_base64 TEXT,
+  blood_group TEXT NOT NULL,
+  availability TEXT NOT NULL,
+  last_donation_date TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  save_to_phone_contacts INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  sync_status TEXT NOT NULL DEFAULT 'pending_upsert',
+  remote_id TEXT,
+  last_synced_at TEXT
+)
+''');
+    await db.execute(
+      'CREATE INDEX idx_contacts_updated_at ON $_contactsTable(updated_at)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_contacts_sync_status ON $_contactsTable(sync_status)',
+    );
+
+    await db.execute('''
+CREATE TABLE $_needsTable (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  patient_name TEXT NOT NULL,
+  blood_group TEXT NOT NULL,
+  hospital TEXT NOT NULL,
+  urgency TEXT NOT NULL,
+  status TEXT NOT NULL,
+  sort_rank INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  sync_status TEXT NOT NULL DEFAULT 'pending_upsert',
+  remote_id TEXT,
+  last_synced_at TEXT
+)
+''');
+    await db.execute(
+      'CREATE INDEX idx_needs_sync_status ON $_needsTable(sync_status)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_needs_sort_rank ON $_needsTable(sort_rank)',
+    );
+  }
+
+  Future<void> _upgradeNeedsSchemaV2(sqflite.DatabaseExecutor db) async {
+    await db.execute(
+      "ALTER TABLE $_needsTable ADD COLUMN patient_name TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      "ALTER TABLE $_needsTable ADD COLUMN blood_group TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      "ALTER TABLE $_needsTable ADD COLUMN hospital TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      "ALTER TABLE $_needsTable ADD COLUMN urgency TEXT NOT NULL DEFAULT 'normal'",
+    );
+    await db.execute(
+      "ALTER TABLE $_needsTable ADD COLUMN status TEXT NOT NULL DEFAULT 'open'",
+    );
+    await db.execute(
+      'ALTER TABLE $_needsTable ADD COLUMN sort_rank INTEGER NOT NULL DEFAULT 0',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_needs_sort_rank ON $_needsTable(sort_rank)',
+    );
+  }
+
+  Future<void> _migrateLegacyContacts() async {
+    if (_prefs.getBool(_legacyContactsMigratedKey) ?? false) return;
+
+    final rawContacts = _prefs.getStringList(_legacyContactsKey) ?? [];
+    if (rawContacts.isNotEmpty) {
+      final contacts = <BloodContact>[];
+      for (final rawContact in rawContacts) {
+        try {
+          contacts.add(BloodContact.fromJson(jsonDecode(rawContact)));
+        } on FormatException {
+          continue;
+        } on TypeError {
+          continue;
+        }
+      }
+      await saveContacts(contacts);
+    }
+
+    await _prefs.setBool(_legacyContactsMigratedKey, true);
+  }
+
+  sqflite.Database get _db {
+    final database = _database;
+    if (database == null) {
+      throw StateError('ContactsStore.init must be called before use.');
+    }
+    return database;
+  }
+}
+
+Map<String, Object?> _contactToRow(BloodContact contact) {
+  return {
+    'id': contact.id,
+    'name': contact.name,
+    'phone': contact.phone,
+    'email': contact.email,
+    'photo_path': contact.photoPath,
+    'photo_base64': contact.photoBase64,
+    'blood_group': contact.bloodGroup,
+    'availability': contact.availability.name,
+    'last_donation_date': contact.lastDonationDate?.toIso8601String(),
+    'note': contact.note,
+    'save_to_phone_contacts': contact.saveToPhoneContacts ? 1 : 0,
+    'updated_at': contact.updatedAt.toIso8601String(),
+    'deleted_at': null,
+    'sync_status': 'pending_upsert',
+  };
+}
+
+BloodContact _contactFromRow(Map<String, Object?> row) {
+  return BloodContact(
+    id: row['id'] as String,
+    name: row['name'] as String,
+    phone: row['phone'] as String,
+    email: row['email'] as String? ?? '',
+    photoPath: row['photo_path'] as String?,
+    photoBase64: row['photo_base64'] as String?,
+    bloodGroup: row['blood_group'] as String,
+    availability: DonorAvailability.values.firstWhere(
+      (value) => value.name == row['availability'],
+      orElse: () => DonorAvailability.available,
+    ),
+    lastDonationDate: DateTime.tryParse(
+      row['last_donation_date'] as String? ?? '',
+    ),
+    note: row['note'] as String? ?? '',
+    saveToPhoneContacts: (row['save_to_phone_contacts'] as int? ?? 0) == 1,
+    updatedAt:
+        DateTime.tryParse(row['updated_at'] as String? ?? '') ?? DateTime.now(),
+  );
+}
+
+Map<String, Object?> _needToRow(
+  BloodNeedRequest need, {
+  bool markSynced = false,
+}) {
+  return {
+    'id': need.id,
+    'payload_json': jsonEncode(need.toJson()),
+    'patient_name': need.patientName,
+    'blood_group': need.bloodGroup,
+    'hospital': need.hospital,
+    'urgency': need.urgency.name,
+    'status': need.status.name,
+    'sort_rank': need.sortRank,
+    'updated_at': need.updatedAt.toIso8601String(),
+    'deleted_at': null,
+    'sync_status': markSynced ? 'synced' : 'pending_upsert',
+  };
+}
+
+BloodNeedRequest _needFromRow(Map<String, Object?> row) {
+  final payload = jsonDecode(row['payload_json'] as String);
+  return BloodNeedRequest.fromJson(payload as Map<String, Object?>);
 }

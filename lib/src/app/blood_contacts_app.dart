@@ -1,9 +1,12 @@
 import 'package:blood_contacts/src/app/app_theme.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/pages/blood_contacts_home.dart';
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart' as sqflite;
 
 class BloodContactsApp extends StatelessWidget {
-  const BloodContactsApp({super.key});
+  const BloodContactsApp({super.key, this.databaseFactory});
+
+  final sqflite.DatabaseFactory? databaseFactory;
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +25,7 @@ class BloodContactsApp extends StatelessWidget {
           ),
         );
       },
-      home: const BloodContactsHome(),
+      home: BloodContactsHome(databaseFactory: databaseFactory),
     );
   }
 }
