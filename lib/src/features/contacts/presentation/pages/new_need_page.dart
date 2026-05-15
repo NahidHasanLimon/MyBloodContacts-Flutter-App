@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as phone_contacts;
 
 class NewNeedPage extends StatefulWidget {
-  const NewNeedPage({super.key});
+  const NewNeedPage({super.key, this.initialNeed});
+
+  final BloodNeedRequest? initialNeed;
 
   @override
   State<NewNeedPage> createState() => _NewNeedPageState();
@@ -21,42 +23,31 @@ class _NewNeedPageState extends State<NewNeedPage> {
   final _notesController = TextEditingController();
 
   String? _bloodGroup = 'O+';
-  int _unitsNeeded = 2;
+  int _unitsNeeded = 1;
   bool _urgent = true;
   DateTime _needDate = DateTime.now();
   TimeOfDay? _needTime;
-  String? _relation = 'Cousin';
   bool _requestedBySameAsContactPerson = true;
   bool _submitted = false;
+  bool get _isEditing => widget.initialNeed != null;
 
-  static const _relations = [
-    'Self',
-    'Father',
-    'Mother',
-    'Parent',
-    'Husband',
-    'Wife',
-    'Spouse',
-    'Son',
-    'Daughter',
-    'Brother',
-    'Sister',
-    'Grandfather',
-    'Grandmother',
-    'Grandparent',
-    'Grandchild',
-    'Uncle',
-    'Aunt',
-    'Nephew',
-    'Niece',
-    'Cousin',
-    'Friend',
-    'Colleague',
-    'Neighbor',
-    'Guardian',
-    'Relative',
-    'Other',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    final need = widget.initialNeed;
+    if (need == null) return;
+
+    _bloodGroup = need.bloodGroup.isEmpty ? 'O+' : need.bloodGroup;
+    _unitsNeeded = need.units;
+    _urgent = need.urgency == NeedUrgency.urgent;
+    _needDate = _parseNeedDate(need.date) ?? DateTime.now();
+    _needTime = _parseNeedTime(need.time);
+    _locationController.text = need.hospital;
+    _contactNameController.text = need.requester;
+    _contactPhoneController.text = need.phone;
+    _patientNameController.text = need.patientName;
+    _notesController.text = need.summary;
+  }
 
   @override
   void dispose() {
@@ -139,25 +130,45 @@ class _NewNeedPageState extends State<NewNeedPage> {
         : _patientNameController.text.trim();
     final notes = _notesController.text.trim();
     final now = DateTime.now();
-    final need = BloodNeedRequest(
-      id: 'need-${now.microsecondsSinceEpoch}',
-      patientName: patientName,
-      summary: notes.isEmpty ? '${_relation ?? 'Patient'} needs blood.' : notes,
-      bloodGroup: _bloodGroup ?? 'O+',
-      hospital: _locationController.text.trim(),
-      date: _formatNeedDate(_needDate),
-      time: _needTime == null ? 'Any time' : _needTime!.format(context),
-      requester: requesterName,
-      phone: requesterPhone,
-      units: _unitsNeeded,
-      urgency: _urgent ? NeedUrgency.urgent : NeedUrgency.normal,
-      status: NeedStatus.open,
-      sortRank: now.millisecondsSinceEpoch,
-      updatedAt: now,
-    );
+    final need = _isEditing
+        ? widget.initialNeed!.copyWith(
+            patientName: patientName,
+            summary: notes.isEmpty ? 'Patient needs blood.' : notes,
+            bloodGroup: _bloodGroup ?? 'O+',
+            hospital: _locationController.text.trim(),
+            date: _formatNeedDate(_needDate),
+            time: _needTime == null ? 'Any time' : _needTime!.format(context),
+            requester: requesterName,
+            phone: requesterPhone,
+            units: _unitsNeeded,
+            urgency: _urgent ? NeedUrgency.urgent : NeedUrgency.normal,
+            updatedAt: now,
+          )
+        : BloodNeedRequest(
+            id: 'need-${now.microsecondsSinceEpoch}',
+            patientName: patientName,
+            summary: notes.isEmpty ? 'Patient needs blood.' : notes,
+            bloodGroup: _bloodGroup ?? 'O+',
+            hospital: _locationController.text.trim(),
+            date: _formatNeedDate(_needDate),
+            time: _needTime == null ? 'Any time' : _needTime!.format(context),
+            requester: requesterName,
+            phone: requesterPhone,
+            units: _unitsNeeded,
+            urgency: _urgent ? NeedUrgency.urgent : NeedUrgency.normal,
+            status: NeedStatus.open,
+            sortRank: now.millisecondsSinceEpoch,
+            updatedAt: now,
+          );
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Blood need saved successfully.')),
+      SnackBar(
+        content: Text(
+          _isEditing
+              ? 'Blood need updated successfully.'
+              : 'Blood need saved successfully.',
+        ),
+      ),
     );
     Navigator.pop(context, need);
   }
@@ -181,7 +192,10 @@ class _NewNeedPageState extends State<NewNeedPage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
             children: [
-              _PageHeader(onBack: () => Navigator.pop(context)),
+              _PageHeader(
+                onBack: () => Navigator.pop(context),
+                isEditing: _isEditing,
+              ),
               const SizedBox(height: 22),
               const _SectionTitle('BLOOD REQUIREMENT'),
               const SizedBox(height: 10),
@@ -344,23 +358,11 @@ class _NewNeedPageState extends State<NewNeedPage> {
               const SizedBox(height: 22),
               const _SectionTitle('PATIENT / RECIPIENT (OPTIONAL)'),
               const SizedBox(height: 10),
-              _ResponsivePair(
-                first: _NeedTextField(
-                  controller: _patientNameController,
-                  label: 'Patient / Recipient Name',
-                  hint: 'Enter patient name',
-                  icon: Icons.person_outline,
-                ),
-                second: _FieldCard(
-                  child: _NeedDropdown<String>(
-                    label: 'Relation',
-                    value: _relation,
-                    icon: Icons.group_outlined,
-                    items: _relations,
-                    labelBuilder: (value) => value,
-                    onChanged: (value) => setState(() => _relation = value),
-                  ),
-                ),
+              _NeedTextField(
+                controller: _patientNameController,
+                label: 'Patient / Recipient Name',
+                hint: 'Enter patient name',
+                icon: Icons.person_outline,
               ),
               const SizedBox(height: 10),
               _NeedTextField(
@@ -376,8 +378,8 @@ class _NewNeedPageState extends State<NewNeedPage> {
                 height: 54,
                 child: FilledButton.icon(
                   onPressed: _submit,
-                  icon: const Icon(Icons.send, size: 24),
-                  label: const Text('Save Need'),
+                  icon: Icon(_isEditing ? Icons.save : Icons.send, size: 24),
+                  label: Text(_isEditing ? 'Update Need' : 'Save Need'),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xffd90416),
                     foregroundColor: Colors.white,
@@ -418,6 +420,51 @@ class _NewNeedPageState extends State<NewNeedPage> {
       'Dec',
     ];
     return '${date.day} ${months[date.month - 1]} ${date.year}';
+  }
+
+  DateTime? _parseNeedDate(String value) {
+    final parts = value.trim().split(' ');
+    if (parts.length != 3) return null;
+
+    const months = {
+      'Jan': 1,
+      'Feb': 2,
+      'Mar': 3,
+      'Apr': 4,
+      'May': 5,
+      'Jun': 6,
+      'Jul': 7,
+      'Aug': 8,
+      'Sep': 9,
+      'Oct': 10,
+      'Nov': 11,
+      'Dec': 12,
+    };
+
+    final day = int.tryParse(parts[0]);
+    final month = months[parts[1]];
+    final year = int.tryParse(parts[2]);
+    if (day == null || month == null || year == null) return null;
+    return DateTime(year, month, day);
+  }
+
+  TimeOfDay? _parseNeedTime(String value) {
+    if (value.trim().toLowerCase() == 'any time') return null;
+    final match = RegExp(
+      r'^(\d{1,2}):(\d{2})\s?(AM|PM)$',
+      caseSensitive: false,
+    ).firstMatch(value.trim());
+    if (match == null) return null;
+
+    var hour = int.parse(match.group(1)!);
+    final minute = int.parse(match.group(2)!);
+    final period = match.group(3)!.toUpperCase();
+    if (hour == 12) {
+      hour = period == 'AM' ? 0 : 12;
+    } else if (period == 'PM') {
+      hour += 12;
+    }
+    return TimeOfDay(hour: hour, minute: minute);
   }
 }
 
@@ -469,9 +516,10 @@ class _SameAsContactPersonTile extends StatelessWidget {
 }
 
 class _PageHeader extends StatelessWidget {
-  const _PageHeader({required this.onBack});
+  const _PageHeader({required this.onBack, required this.isEditing});
 
   final VoidCallback onBack;
+  final bool isEditing;
 
   @override
   Widget build(BuildContext context) {
@@ -483,25 +531,27 @@ class _PageHeader extends StatelessWidget {
           onPressed: onBack,
         ),
         const SizedBox(width: 18),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'New Need',
-                style: TextStyle(
+                isEditing ? 'Edit Need' : 'New Need',
+                style: const TextStyle(
                   color: Color(0xff050505),
                   fontSize: 28,
                   height: 1.05,
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              SizedBox(height: 6),
+              const SizedBox(height: 6),
               Text(
-                'Create a blood request and notify donors.',
+                isEditing
+                    ? 'Update blood request information.'
+                    : 'Create a blood request and notify donors.',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
+                style: const TextStyle(
                   color: Color(0xff44475a),
                   fontSize: 14,
                   fontWeight: FontWeight.w600,

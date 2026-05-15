@@ -32,6 +32,12 @@ void main() {
     expect(restored.photoBytes, bytes);
   });
 
+  test('normalizes phone numbers for duplicate checks', () {
+    expect(normalizedPhoneNumber('+880 1700-000000'), '01700000000');
+    expect(normalizedPhoneNumber('008801700000000'), '01700000000');
+    expect(normalizedPhoneNumber('01700 000 000'), '01700000000');
+  });
+
   testWidgets('renders quick overview home screen', (tester) async {
     SharedPreferences.setMockInitialValues({});
 

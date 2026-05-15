@@ -1,9 +1,11 @@
 import 'package:blood_contacts/src/features/contacts/domain/blood_need_request.dart';
+import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 enum NeedUrgencyFilter { all, urgent, normal }
 
-enum NeedStatusFilter { all, open, inProgress, fulfilled, cancelled }
+enum NeedStatusFilter { all, open, fulfilled, closed, cancelled }
 
 enum NeedSortOption { newest, oldest, unitsHigh }
 
@@ -12,10 +14,18 @@ class NeedsListPage extends StatefulWidget {
     super.key,
     required this.needs,
     required this.onOpenDetails,
+    required this.onAddNeed,
+    this.initialGroup = 'All',
+    this.initialUrgency = NeedUrgencyFilter.all,
+    this.initialStatus = NeedStatusFilter.all,
   });
 
   final List<BloodNeedRequest> needs;
   final ValueChanged<BloodNeedRequest> onOpenDetails;
+  final VoidCallback onAddNeed;
+  final String initialGroup;
+  final NeedUrgencyFilter initialUrgency;
+  final NeedStatusFilter initialStatus;
 
   @override
   State<NeedsListPage> createState() => _NeedsListPageState();
@@ -28,6 +38,30 @@ class _NeedsListPageState extends State<NeedsListPage> {
   NeedUrgencyFilter _selectedUrgency = NeedUrgencyFilter.all;
   NeedStatusFilter _selectedStatus = NeedStatusFilter.all;
   NeedSortOption _selectedSort = NeedSortOption.newest;
+
+  @override
+  void initState() {
+    super.initState();
+    _applyInitialFilters();
+  }
+
+  @override
+  void didUpdateWidget(covariant NeedsListPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialGroup != widget.initialGroup ||
+        oldWidget.initialUrgency != widget.initialUrgency ||
+        oldWidget.initialStatus != widget.initialStatus) {
+      _applyInitialFilters();
+    }
+  }
+
+  void _applyInitialFilters() {
+    _selectedGroup = widget.initialGroup;
+    _selectedUrgency = widget.initialUrgency;
+    _selectedStatus = widget.initialStatus;
+    _query = '';
+    _filtersVisible = false;
+  }
 
   List<BloodNeedRequest> get _filteredNeeds {
     final query = _query.trim().toLowerCase();
@@ -45,8 +79,8 @@ class _NeedsListPageState extends State<NeedsListPage> {
       final matchesStatus = switch (_selectedStatus) {
         NeedStatusFilter.all => true,
         NeedStatusFilter.open => need.status == NeedStatus.open,
-        NeedStatusFilter.inProgress => need.status == NeedStatus.inProgress,
         NeedStatusFilter.fulfilled => need.status == NeedStatus.fulfilled,
+        NeedStatusFilter.closed => need.status == NeedStatus.closed,
         NeedStatusFilter.cancelled => need.status == NeedStatus.cancelled,
       };
 
@@ -128,21 +162,24 @@ class _NeedsListPageState extends State<NeedsListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final total = widget.needs.length;
-    final urgent = widget.needs
+    final needs = _filteredNeeds;
+    final total = needs.length;
+    final urgent = needs
         .where((need) => need.urgency == NeedUrgency.urgent)
         .length;
-    final open = widget.needs
-        .where((need) => need.status == NeedStatus.open)
-        .length;
-    final needs = _filteredNeeds;
+    final open = needs.where((need) => need.status == NeedStatus.open).length;
 
     return ColoredBox(
       color: Colors.white,
       child: SafeArea(
         child: CustomScrollView(
           slivers: [
-            SliverToBoxAdapter(child: _NeedsHeader(onReset: _resetFilters)),
+            SliverToBoxAdapter(
+              child: _NeedsHeader(
+                onReset: _resetFilters,
+                onAddNeed: widget.onAddNeed,
+              ),
+            ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(18, 26, 18, 0),
               sliver: SliverToBoxAdapter(
@@ -187,7 +224,7 @@ class _NeedsListPageState extends State<NeedsListPage> {
               )
             else
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 116),
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
                 sliver: SliverList.builder(
                   itemCount: needs.length,
                   itemBuilder: (context, index) {
@@ -209,16 +246,17 @@ class _NeedsListPageState extends State<NeedsListPage> {
 }
 
 class _NeedsHeader extends StatelessWidget {
-  const _NeedsHeader({required this.onReset});
+  const _NeedsHeader({required this.onReset, required this.onAddNeed});
 
   final VoidCallback onReset;
+  final VoidCallback onAddNeed;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Expanded(
             child: Column(
@@ -241,10 +279,32 @@ class _NeedsHeader extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            onPressed: onReset,
-            tooltip: 'Reset',
-            icon: const Icon(Icons.refresh, color: Color(0xffe5161d), size: 24),
+          SizedBox(
+            width: 42,
+            height: 42,
+            child: IconButton(
+              onPressed: onReset,
+              tooltip: 'Reset filters',
+              style: IconButton.styleFrom(
+                backgroundColor: const Color(0xfffff1f2),
+                foregroundColor: const Color(0xffe5161d),
+              ),
+              icon: const Icon(Icons.restart_alt, size: 20),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 42,
+            height: 42,
+            child: IconButton.filled(
+              onPressed: onAddNeed,
+              tooltip: 'Add Need',
+              style: IconButton.styleFrom(
+                backgroundColor: const Color(0xffe5161d),
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.add, size: 20),
+            ),
           ),
         ],
       ),
@@ -449,20 +509,18 @@ class _FilterPopupContent extends StatelessWidget {
                           onTap: () => onStatusChanged(NeedStatusFilter.open),
                         ),
                         _FilterChipButton(
-                          label: 'In Progress',
-                          dotColor: const Color(0xffff8a00),
-                          selected:
-                              selectedStatus == NeedStatusFilter.inProgress,
-                          onTap: () =>
-                              onStatusChanged(NeedStatusFilter.inProgress),
-                        ),
-                        _FilterChipButton(
                           label: 'Fulfilled',
                           dotColor: const Color(0xff1d74e8),
                           selected:
                               selectedStatus == NeedStatusFilter.fulfilled,
                           onTap: () =>
                               onStatusChanged(NeedStatusFilter.fulfilled),
+                        ),
+                        _FilterChipButton(
+                          label: 'Closed',
+                          dotColor: const Color(0xff4b5563),
+                          selected: selectedStatus == NeedStatusFilter.closed,
+                          onTap: () => onStatusChanged(NeedStatusFilter.closed),
                         ),
                         _FilterChipButton(
                           label: 'Cancelled',
@@ -652,28 +710,25 @@ class _NeedStatsRow extends StatelessWidget {
         Expanded(
           child: _NeedStatCard(
             value: total,
-            label: 'Total Requests',
-            icon: Icons.assignment_outlined,
+            label: 'Total',
             color: const Color(0xffe5161d),
             tint: const Color(0xfffff2f4),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
           child: _NeedStatCard(
             value: urgent,
-            label: 'Urgent Requests',
-            icon: Icons.crisis_alert,
+            label: 'Urgent',
             color: const Color(0xffff9700),
             tint: const Color(0xfffff8ec),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
           child: _NeedStatCard(
             value: open,
-            label: 'Open Requests',
-            icon: Icons.groups_2_outlined,
+            label: 'Open',
             color: const Color(0xff16a34a),
             tint: const Color(0xfff1f9f3),
           ),
@@ -687,63 +742,49 @@ class _NeedStatCard extends StatelessWidget {
   const _NeedStatCard({
     required this.value,
     required this.label,
-    required this.icon,
     required this.color,
     required this.tint,
   });
 
   final int value;
   final String label;
-  final IconData icon;
   final Color color;
   final Color tint;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 86,
+      height: 62,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: tint,
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Row(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: color.withValues(alpha: 0.1),
-            child: Icon(icon, color: color, size: 27),
+          Text(
+            '$value',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 18,
+              height: 1,
+              fontWeight: FontWeight.w900,
+            ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$value',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 22,
-                    height: 1,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xff343741),
-                    fontSize: 12,
-                    height: 1.1,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xff343741),
+              fontSize: 10,
+              height: 1.1,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -817,6 +858,39 @@ class NeedRequestCard extends StatelessWidget {
   final BloodNeedRequest need;
   final VoidCallback onTap;
 
+  Future<void> _showQuickActions(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.open_in_new),
+              title: const Text('Open details'),
+              onTap: () {
+                Navigator.of(context).pop();
+                onTap();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_all_outlined),
+              title: const Text('Copy phone'),
+              subtitle: Text(need.phone),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: need.phone));
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Phone copied')));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final urgencyColor = need.urgency.color;
@@ -832,6 +906,7 @@ class NeedRequestCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: () => _showQuickActions(context),
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -880,17 +955,25 @@ class NeedRequestCard extends StatelessWidget {
                                   text: need.hospital,
                                 ),
                                 const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 14,
-                                  runSpacing: 8,
+                                Row(
                                   children: [
-                                    _NeedInfoItem(
-                                      icon: Icons.calendar_today_outlined,
-                                      text: need.date,
+                                    const Icon(
+                                      Icons.calendar_today_outlined,
+                                      color: Color(0xff343741),
+                                      size: 17,
                                     ),
-                                    _NeedInfoItem(
-                                      icon: Icons.schedule,
-                                      text: need.time,
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '${need.date}  •  ${need.time}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Color(0xff343741),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -904,12 +987,6 @@ class NeedRequestCard extends StatelessWidget {
                               _UnitsBadge(units: need.units),
                               const SizedBox(height: 12),
                               _StatusBadge(status: need.status),
-                              const SizedBox(height: 6),
-                              const Icon(
-                                Icons.more_vert,
-                                color: Color(0xff24283a),
-                                size: 24,
-                              ),
                             ],
                           ),
                         ],
@@ -985,26 +1062,26 @@ class _BloodDropBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = need.urgency.color;
+    final color = bloodGroupColors[need.bloodGroup] ?? const Color(0xffe5161d);
 
     return SizedBox(
-      width: 78,
+      width: 68,
       child: Column(
         children: [
           SizedBox(
-            width: 68,
-            height: 68,
+            width: 56,
+            height: 56,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                Icon(Icons.water_drop, color: color, size: 68),
+                Icon(Icons.water_drop, color: color, size: 56),
                 Padding(
-                  padding: const EdgeInsets.only(top: 10),
+                  padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     need.bloodGroup,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 19,
+                      fontSize: 16,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -1012,19 +1089,19 @@ class _BloodDropBadge extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(need.urgency.icon, color: color, size: 14),
-                const SizedBox(width: 4),
+                Icon(need.urgency.icon, color: color, size: 12),
+                const SizedBox(width: 3),
                 Text(
                   need.urgency.label,
                   style: TextStyle(
                     color: color,
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -1062,38 +1139,6 @@ class _NeedInfoLine extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _NeedInfoItem extends StatelessWidget {
-  const _NeedInfoItem({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 130,
-      child: Row(
-        children: [
-          Icon(icon, color: const Color(0xff343741), size: 17),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xff343741),
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

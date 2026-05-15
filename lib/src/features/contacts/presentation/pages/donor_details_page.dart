@@ -2,7 +2,9 @@ import 'package:blood_contacts/src/app/app_theme.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/widgets/contact_common_widgets.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
 class DonorDetailsPage extends StatelessWidget {
@@ -43,29 +45,13 @@ class DonorDetailsPage extends StatelessWidget {
                     onMessage: () => _showComingSoon(context, 'Message'),
                     onWhatsApp: () => _showComingSoon(context, 'WhatsApp'),
                     onShare: () => _shareContact(context),
+                    onCopyNumber: () => _copyNumber(context),
                   ),
                   const SizedBox(height: 18),
                   _InfoSectionCard(
                     icon: Icons.person_outline,
                     title: 'Donor Information',
-                    child: _DonorInformationGrid(contact: contact, red: red),
-                  ),
-                  const SizedBox(height: 14),
-                  _InfoSectionCard(
-                    icon: Icons.schedule_outlined,
-                    title: 'Availability',
-                    child: _AvailabilityTile(contact: contact),
-                  ),
-                  const SizedBox(height: 14),
-                  _InfoSectionCard(
-                    icon: Icons.info_outline,
-                    title: 'Additional Information',
-                    trailing: const Icon(
-                      Icons.chevron_right,
-                      color: _mutedText,
-                      size: 28,
-                    ),
-                    child: _NotesContent(contact: contact),
+                    child: _DonorInfoCombinedContent(contact: contact, red: red),
                   ),
                   const SizedBox(height: 22),
                   _DeleteButton(onDelete: onDelete),
@@ -114,6 +100,38 @@ Remarks: $remarks
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('$label will be connected soon.')));
+  }
+
+  void _copyNumber(BuildContext context) {
+    Clipboard.setData(ClipboardData(text: _valueOrNA(contact.phone)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Phone number copied')));
+  }
+}
+
+class _DonorInfoCombinedContent extends StatelessWidget {
+  const _DonorInfoCombinedContent({required this.contact, required this.red});
+
+  final BloodContact contact;
+  final Color red;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _DonorInformationGrid(contact: contact, red: red),
+        const SizedBox(height: 20),
+        const Divider(color: _dividerColor, height: 1),
+        const SizedBox(height: 12),
+        _AvailabilityTile(contact: contact),
+        const SizedBox(height: 20),
+        const Divider(color: _dividerColor, height: 1),
+        const SizedBox(height: 12),
+        _NotesContent(contact: contact),
+      ],
+    );
   }
 }
 
@@ -243,6 +261,7 @@ class _HeroCard extends StatelessWidget {
     required this.onMessage,
     required this.onWhatsApp,
     required this.onShare,
+    required this.onCopyNumber,
   });
 
   final BloodContact contact;
@@ -251,6 +270,7 @@ class _HeroCard extends StatelessWidget {
   final VoidCallback onMessage;
   final VoidCallback onWhatsApp;
   final VoidCallback onShare;
+  final VoidCallback onCopyNumber;
 
   @override
   Widget build(BuildContext context) {
@@ -294,7 +314,11 @@ class _HeroCard extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: _ActionTile(
-                          icon: Icons.call,
+                          customIcon: const FaIcon(
+                            FontAwesomeIcons.whatsapp,
+                            color: Color(0xff25D366),
+                            size: 20,
+                          ),
                           tooltip: 'WhatsApp',
                           onPressed: onWhatsApp,
                         ),
@@ -305,6 +329,14 @@ class _HeroCard extends StatelessWidget {
                           icon: Icons.share_outlined,
                           tooltip: 'Share',
                           onPressed: onShare,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _ActionTile(
+                          icon: Icons.content_copy_outlined,
+                          tooltip: 'Copy number',
+                          onPressed: onCopyNumber,
                         ),
                       ),
                     ],
@@ -400,14 +432,6 @@ class _HeroDetails extends StatelessWidget {
               border: const Color(0xffffbfc1),
               background: Colors.white.withValues(alpha: 0.72),
             ),
-            _StatusPill(
-              icon: Icons.circle,
-              label: contact.isAvailable ? 'Available' : 'Unavailable',
-              foreground: contact.isAvailable ? _successGreen : _bloodRed,
-              border: _cardBorder,
-              background: const Color(0xfffbf7f1),
-              iconSize: 10,
-            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -429,7 +453,6 @@ class _StatusPill extends StatelessWidget {
     required this.foreground,
     required this.border,
     required this.background,
-    this.iconSize = 20,
   });
 
   final IconData icon;
@@ -437,7 +460,6 @@ class _StatusPill extends StatelessWidget {
   final Color foreground;
   final Color border;
   final Color background;
-  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
@@ -451,7 +473,7 @@ class _StatusPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: foreground, size: iconSize),
+          Icon(icon, color: foreground, size: 20),
           const SizedBox(width: 8),
           Text(
             _valueOrNA(label),
@@ -498,12 +520,14 @@ class _HeroMeta extends StatelessWidget {
 
 class _ActionTile extends StatelessWidget {
   const _ActionTile({
-    required this.icon,
+    this.icon,
+    this.customIcon,
     required this.tooltip,
     required this.onPressed,
   });
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? customIcon;
   final String tooltip;
   final VoidCallback onPressed;
 
@@ -518,7 +542,7 @@ class _ActionTile extends StatelessWidget {
           onTap: onPressed,
           borderRadius: BorderRadius.circular(8),
           child: Container(
-            height: 60,
+            height: 54,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: _cardBorder),
@@ -527,7 +551,9 @@ class _ActionTile extends StatelessWidget {
               ],
             ),
             alignment: Alignment.center,
-            child: Icon(icon, color: _bloodRed, size: 28),
+            child:
+                customIcon ??
+                Icon(icon ?? Icons.circle_outlined, color: _bloodRed, size: 22),
           ),
         ),
       ),
@@ -540,13 +566,11 @@ class _InfoSectionCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.child,
-    this.trailing,
   });
 
   final IconData icon;
   final String title;
   final Widget child;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -570,7 +594,6 @@ class _InfoSectionCard extends StatelessWidget {
                   ),
                 ),
               ),
-              ?trailing,
             ],
           ),
           const SizedBox(height: 22),
@@ -749,42 +772,23 @@ class _AvailabilityTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isAvailable = contact.isAvailable;
-    final color = isAvailable ? _successGreen : _bloodRed;
-
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: isAvailable ? const Color(0xfff3fbf5) : const Color(0xfffff4f4),
+        color: const Color(0xfffaf8f6),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isAvailable ? const Color(0xffd8ecd8) : _cardBorder,
-        ),
+        border: Border.all(color: _cardBorder),
       ),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: color, width: 2),
-            ),
-            child: Icon(
-              isAvailable ? Icons.check : Icons.close,
-              color: color,
-              size: 26,
-            ),
-          ),
-          const SizedBox(width: 18),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isAvailable ? 'Available' : 'Unavailable',
-                  style: TextStyle(
-                    color: color,
+                  contact.isAvailable ? 'Available' : 'Unavailable',
+                  style: const TextStyle(
+                    color: Colors.black,
                     fontSize: AppFontSizes.cardTitle,
                     fontWeight: FontWeight.w900,
                   ),
@@ -801,7 +805,6 @@ class _AvailabilityTile extends StatelessWidget {
               ],
             ),
           ),
-          Icon(Icons.chevron_right, color: color, size: 28),
         ],
       ),
     );

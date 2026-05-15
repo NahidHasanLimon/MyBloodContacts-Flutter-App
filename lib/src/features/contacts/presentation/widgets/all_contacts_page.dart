@@ -1,125 +1,250 @@
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
-import 'package:blood_contacts/src/features/contacts/domain/contact_stats.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/widgets/contact_common_widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
-class AllContactsPage extends StatelessWidget {
+class AllContactsPage extends StatefulWidget {
   const AllContactsPage({
     super.key,
-    required this.stats,
     required this.contacts,
+    required this.totalCount,
+    required this.availableCount,
     required this.query,
     required this.selectedGroup,
-    required this.selectedAvailability,
-    required this.selectedArea,
-    required this.nearbyOnly,
-    required this.areaOptions,
+    required this.selectedSort,
     required this.onQueryChanged,
     required this.onGroupChanged,
-    required this.onAvailabilityChanged,
-    required this.onAreaChanged,
-    required this.onNearbyChanged,
+    required this.onSortChanged,
     required this.onClearFilters,
     required this.onAdd,
     required this.onBack,
+    required this.onOpenDetails,
     required this.onEditContact,
     required this.onDeleteContact,
   });
 
-  final ContactStats stats;
   final List<BloodContact> contacts;
+  final int totalCount;
+  final int availableCount;
   final String query;
   final String selectedGroup;
-  final AvailabilityFilter selectedAvailability;
-  final String selectedArea;
-  final bool nearbyOnly;
-  final List<String> areaOptions;
+  final ContactsSortOption selectedSort;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<String> onGroupChanged;
-  final ValueChanged<AvailabilityFilter> onAvailabilityChanged;
-  final ValueChanged<String> onAreaChanged;
-  final ValueChanged<bool> onNearbyChanged;
+  final ValueChanged<ContactsSortOption> onSortChanged;
   final VoidCallback onClearFilters;
   final VoidCallback onAdd;
   final VoidCallback onBack;
+  final ValueChanged<BloodContact> onOpenDetails;
   final ValueChanged<BloodContact> onEditContact;
   final ValueChanged<BloodContact> onDeleteContact;
+
+  @override
+  State<AllContactsPage> createState() => _AllContactsPageState();
+}
+
+class _AllContactsPageState extends State<AllContactsPage> {
+  static const _chipGroups = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
+  bool _filtersExpanded = true;
 
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
       color: Colors.white,
       child: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: ContactsPageHeader(
-                query: query,
-                onQueryChanged: onQueryChanged,
-                onBack: onBack,
+        child: Column(
+          children: [
+            ContactsPageHeader(
+              onAdd: widget.onAdd,
+              onResetFilters: widget.onClearFilters,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
+              child: ContactsSearchBar(
+                query: widget.query,
+                onQueryChanged: widget.onQueryChanged,
+                onReset: () => widget.onQueryChanged(''),
               ),
             ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              sliver: SliverToBoxAdapter(
-                child: ContactsFilterBar(
-                  selectedGroup: selectedGroup,
-                  selectedAvailability: selectedAvailability,
-                  selectedArea: selectedArea,
-                  nearbyOnly: nearbyOnly,
-                  areaOptions: areaOptions,
-                  onGroupChanged: onGroupChanged,
-                  onAvailabilityChanged: onAvailabilityChanged,
-                  onAreaChanged: onAreaChanged,
-                  onNearbyChanged: onNearbyChanged,
-                  onClearFilters: onClearFilters,
-                ),
-              ),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              sliver: SliverToBoxAdapter(
-                child: ContactsSummaryCards(stats: stats),
-              ),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
-              sliver: SliverToBoxAdapter(
-                child: ContactsListToolbar(foundCount: contacts.length),
-              ),
-            ),
-            if (contacts.isEmpty)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: EmptyContactsList(),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-                sliver: SliverList.builder(
-                  itemCount: contacts.length,
-                  itemBuilder: (context, index) {
-                    final contact = contacts[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: DetailedContactTile(
-                        contact: contact,
-                        onTap: () => onEditContact(contact),
-                        onDelete: () => onDeleteContact(contact),
+            const SizedBox(height: 14),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 150),
+              alignment: Alignment.topCenter,
+              curve: Curves.easeOut,
+              child: _filtersExpanded
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: _FiltersGroupCard(
+                        totalCount: widget.totalCount,
+                        availableCount: widget.availableCount,
+                        selectedGroup: widget.selectedGroup,
+                        groups: _chipGroups,
+                        selectedSort: widget.selectedSort,
+                        onGroupChanged: widget.onGroupChanged,
+                        onSortChanged: widget.onSortChanged,
+                        onCollapse: () =>
+                            setState(() => _filtersExpanded = false),
                       ),
-                    );
-                  },
-                ),
-              ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 96, 116),
-              sliver: SliverToBoxAdapter(
-                child: DataSafeCard(onTap: onClearFilters),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: Stack(
+                children: [
+                  if (widget.contacts.isEmpty)
+                    const EmptyContactsList()
+                  else
+                    ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 116),
+                      itemCount: widget.contacts.length,
+                      itemBuilder: (context, index) {
+                        final contact = widget.contacts[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: DetailedContactTile(
+                            contact: contact,
+                            onDetails: () => widget.onOpenDetails(contact),
+                            onEdit: () => widget.onEditContact(contact),
+                            onDelete: () => widget.onDeleteContact(contact),
+                          ),
+                        );
+                      },
+                    ),
+                  if (!_filtersExpanded)
+                    Positioned(
+                      top: 6,
+                      right: 16,
+                      child: SizedBox(
+                        width: 38,
+                        height: 38,
+                        child: IconButton.filled(
+                          tooltip: 'Expand filters',
+                          onPressed: () => setState(() {
+                            _filtersExpanded = true;
+                          }),
+                          style: IconButton.styleFrom(
+                            backgroundColor: const Color(0xffe5161d),
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.open_in_full, size: 18),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _FiltersGroupCard extends StatelessWidget {
+  const _FiltersGroupCard({
+    required this.totalCount,
+    required this.availableCount,
+    required this.selectedGroup,
+    required this.groups,
+    required this.selectedSort,
+    required this.onGroupChanged,
+    required this.onSortChanged,
+    required this.onCollapse,
+  });
+
+  final int totalCount;
+  final int availableCount;
+  final String selectedGroup;
+  final List<String> groups;
+  final ContactsSortOption selectedSort;
+  final ValueChanged<String> onGroupChanged;
+  final ValueChanged<ContactsSortOption> onSortChanged;
+  final VoidCallback onCollapse;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+      decoration: BoxDecoration(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xffffe6de)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: BloodGroupFilterChip(
+                  label: 'All',
+                  selected: selectedGroup == 'All Groups',
+                  onTap: () => onGroupChanged('All Groups'),
+                ),
+              ),
+              for (final group in groups) ...[
+                const SizedBox(width: 4),
+                Expanded(
+                  child: BloodGroupFilterChip(
+                    label: group,
+                    selected: selectedGroup == group,
+                    onTap: () => onGroupChanged(group),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: ContactsStatsRow(
+              totalCount: totalCount,
+              availableCount: availableCount,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+            child: Row(
+              children: [
+                const Text(
+                  'Sort by',
+                  style: TextStyle(
+                    color: Color(0xff433532),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: SortMenuButton(
+                      selectedSort: selectedSort,
+                      onSortChanged: onSortChanged,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: onCollapse,
+                  tooltip: 'Collapse filters',
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 30,
+                    height: 30,
+                  ),
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xffffece7),
+                    foregroundColor: const Color(0xff7d3e32),
+                    padding: EdgeInsets.zero,
+                  ),
+                  icon: const Icon(Icons.close_fullscreen, size: 16),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -128,90 +253,65 @@ class AllContactsPage extends StatelessWidget {
 class ContactsPageHeader extends StatelessWidget {
   const ContactsPageHeader({
     super.key,
-    required this.query,
-    required this.onQueryChanged,
-    required this.onBack,
+    required this.onAdd,
+    required this.onResetFilters,
   });
 
-  final String query;
-  final ValueChanged<String> onQueryChanged;
-  final VoidCallback onBack;
+  final VoidCallback onAdd;
+  final VoidCallback onResetFilters;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 22, 16, 20),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xffb90f16), Color(0xffe5161d)],
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              IconButton(
-                tooltip: 'Back to overview',
-                onPressed: onBack,
-                icon: const Icon(Icons.menu, color: Colors.white, size: 34),
-              ),
-              const SizedBox(width: 8),
               const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Contacts',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 32,
-                        height: 1,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'All your important contacts',
-                      style: TextStyle(color: Colors.white, fontSize: 17),
-                    ),
-                  ],
+                child: Text(
+                  'Contacts',
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 28,
+                    height: 1.05,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
-              IconButton(
-                tooltip: 'Search contacts',
-                onPressed: () {},
-                icon: const Icon(Icons.search, color: Colors.white, size: 34),
+              SizedBox(
+                width: 42,
+                height: 42,
+                child: IconButton(
+                  onPressed: onResetFilters,
+                  tooltip: 'Reset filters',
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xfffff1f2),
+                    foregroundColor: const Color(0xffe5161d),
+                  ),
+                  icon: const Icon(Icons.restart_alt, size: 20),
+                ),
               ),
-              IconButton(
-                tooltip: 'More',
-                onPressed: () {},
-                icon: const Icon(
-                  Icons.more_vert,
-                  color: Colors.white,
-                  size: 32,
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 42,
+                height: 42,
+                child: IconButton.filled(
+                  onPressed: onAdd,
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xffe5161d),
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.add, size: 20),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 22),
-          TextField(
-            controller: TextEditingController(text: query)
-              ..selection = TextSelection.collapsed(offset: query.length),
-            onChanged: onQueryChanged,
-            decoration: InputDecoration(
-              hintText: 'Search by name or phone number',
-              prefixIcon: const Icon(Icons.search, size: 28),
-              suffixIcon: const Icon(Icons.filter_alt_outlined),
-              filled: true,
-              fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(vertical: 18),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(32),
-                borderSide: BorderSide.none,
-              ),
-            ),
+          const SizedBox(height: 2),
+          const Text(
+            'Find and connect with blood donors.',
+            style: TextStyle(color: Color(0xff343741), fontSize: 14),
           ),
         ],
       ),
@@ -219,121 +319,126 @@ class ContactsPageHeader extends StatelessWidget {
   }
 }
 
-class ContactsSummaryCards extends StatelessWidget {
-  const ContactsSummaryCards({super.key, required this.stats});
+class ContactsSearchBar extends StatefulWidget {
+  const ContactsSearchBar({
+    super.key,
+    required this.query,
+    required this.onQueryChanged,
+    required this.onReset,
+  });
 
-  final ContactStats stats;
+  final String query;
+  final ValueChanged<String> onQueryChanged;
+  final VoidCallback onReset;
+
+  @override
+  State<ContactsSearchBar> createState() => _ContactsSearchBarState();
+}
+
+class _ContactsSearchBarState extends State<ContactsSearchBar> {
+  final FocusNode _focusNode = FocusNode();
+  bool _hasFocus = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    _focusNode
+      ..removeListener(_onFocusChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onFocusChanged() {
+    if (_hasFocus == _focusNode.hasFocus) return;
+    setState(() => _hasFocus = _focusNode.hasFocus);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 94,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      height: 56,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xfff0ecec)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x12000000),
-            blurRadius: 14,
-            offset: Offset(0, 8),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _hasFocus ? const Color(0xffe5161d) : const Color(0xfff2c6ca),
+          width: _hasFocus ? 1.0 : 0.55,
+        ),
       ),
       child: Row(
         children: [
+          const SizedBox(width: 14),
+          const Icon(Icons.search, color: Color(0xff454854), size: 24),
+          const SizedBox(width: 10),
           Expanded(
-            child: SummaryMetricCard(
-              label: 'Total contacts',
-              value: stats.total,
-              icon: Icons.groups_outlined,
-              color: const Color(0xffe5161d),
+            child: TextField(
+              focusNode: _focusNode,
+              controller: TextEditingController(text: widget.query)
+                ..selection = TextSelection.collapsed(
+                  offset: widget.query.length,
+                ),
+              onTapOutside: (_) => FocusScope.of(context).unfocus(),
+              onChanged: widget.onQueryChanged,
+              decoration: const InputDecoration(
+                hintText: 'Search by name or phone number...',
+                hintStyle: TextStyle(color: Color(0xff5d606b), fontSize: 14),
+                border: InputBorder.none,
+                isDense: true,
+              ),
             ),
           ),
-          const VerticalDivider(width: 18),
-          Expanded(
-            child: SummaryMetricCard(
-              label: 'O+ contacts',
-              value: stats.groupCounts['O+'] ?? 0,
-              icon: Icons.water_drop,
-              color: const Color(0xffe5161d),
+          IconButton(
+            onPressed: widget.onReset,
+            tooltip: 'Reset',
+            icon: const Icon(
+              Icons.restart_alt,
+              color: Color(0xffe5161d),
+              size: 22,
             ),
           ),
-          const VerticalDivider(width: 18),
-          Expanded(
-            child: SummaryMetricCard(
-              label: 'Available',
-              value: stats.available,
-              icon: Icons.circle,
-              color: const Color(0xff16a34a),
-            ),
-          ),
-          const VerticalDivider(width: 18),
-          Expanded(
-            child: SummaryMetricCard(
-              label: 'Nearby',
-              value: stats.nearby,
-              icon: Icons.location_on_outlined,
-              color: const Color(0xffe5161d),
-            ),
-          ),
+          const SizedBox(width: 14),
         ],
       ),
     );
   }
 }
 
-class SummaryMetricCard extends StatelessWidget {
-  const SummaryMetricCard({
+class ContactsStatsRow extends StatelessWidget {
+  const ContactsStatsRow({
     super.key,
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
+    required this.totalCount,
+    required this.availableCount,
   });
 
-  final String label;
-  final int value;
-  final IconData icon;
-  final Color color;
+  final int totalCount;
+  final int availableCount;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: color, size: 20),
-        ),
-        const SizedBox(width: 8),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '$value',
-                style: const TextStyle(
-                  color: Color(0xff121212),
-                  fontSize: 24,
-                  height: 1,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xff555560), fontSize: 12),
-              ),
-            ],
+          child: ContactStatCard(
+            value: totalCount,
+            label: 'Total Donors',
+            icon: Icons.groups_2_outlined,
+            iconColor: const Color(0xffe5161d),
+            tint: const Color(0xfffff4f5),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ContactStatCard(
+            value: availableCount,
+            label: 'Available Now',
+            icon: Icons.water_drop_outlined,
+            iconColor: const Color(0xff16a34a),
+            tint: const Color(0xfff6fbf6),
           ),
         ),
       ],
@@ -341,264 +446,180 @@ class SummaryMetricCard extends StatelessWidget {
   }
 }
 
-class ContactsFilterBar extends StatelessWidget {
-  const ContactsFilterBar({
+class ContactStatCard extends StatelessWidget {
+  const ContactStatCard({
     super.key,
-    required this.selectedGroup,
-    required this.selectedAvailability,
-    required this.selectedArea,
-    required this.nearbyOnly,
-    required this.areaOptions,
-    required this.onGroupChanged,
-    required this.onAvailabilityChanged,
-    required this.onAreaChanged,
-    required this.onNearbyChanged,
-    required this.onClearFilters,
+    required this.value,
+    required this.label,
+    required this.icon,
+    required this.iconColor,
+    required this.tint,
   });
 
-  final String selectedGroup;
-  final AvailabilityFilter selectedAvailability;
-  final String selectedArea;
-  final bool nearbyOnly;
-  final List<String> areaOptions;
-  final ValueChanged<String> onGroupChanged;
-  final ValueChanged<AvailabilityFilter> onAvailabilityChanged;
-  final ValueChanged<String> onAreaChanged;
-  final ValueChanged<bool> onNearbyChanged;
-  final VoidCallback onClearFilters;
+  final int value;
+  final String label;
+  final IconData icon;
+  final Color iconColor;
+  final Color tint;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 76,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      height: 54,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xfff0ecec)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x10000000),
-            blurRadius: 12,
-            offset: Offset(0, 6),
-          ),
-        ],
+        color: tint,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xffefeeee)),
       ),
-      child: ListView(
-        scrollDirection: Axis.horizontal,
+      child: Row(
         children: [
-          FilterActionPill(
-            label: 'All',
-            icon: Icons.groups_outlined,
-            selected:
-                selectedGroup == 'All Groups' &&
-                selectedAvailability == AvailabilityFilter.all &&
-                selectedArea == 'All Areas',
-            onTap: onClearFilters,
+          CircleAvatar(
+            radius: 15,
+            backgroundColor: iconColor.withValues(alpha: 0.12),
+            child: Icon(icon, color: iconColor, size: 15),
           ),
-          const SizedBox(width: 10),
-          FilterDropdownPill<String>(
-            label: selectedGroup == 'All Groups'
-                ? 'Blood group'
-                : selectedGroup,
-            icon: Icons.water_drop,
-            values: const ['All Groups', ...bloodGroups],
-            labelBuilder: (value) => value,
-            onSelected: onGroupChanged,
-            selected: selectedGroup != 'All Groups',
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$value',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: iconColor,
+                    fontSize: 16,
+                    height: 1,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xff343741),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(width: 10),
-          FilterDropdownPill<AvailabilityFilter>(
-            label: selectedAvailability == AvailabilityFilter.all
-                ? 'Status'
-                : selectedAvailability.label,
-            icon: Icons.circle,
-            values: AvailabilityFilter.values,
-            labelBuilder: (value) => value.label,
-            onSelected: onAvailabilityChanged,
-            selected: selectedAvailability != AvailabilityFilter.all,
-          ),
-          const SizedBox(width: 10),
-          FilterActionPill(
-            label: 'Nearby',
-            icon: Icons.location_on_outlined,
-            selected: nearbyOnly,
-            onTap: () => onNearbyChanged(!nearbyOnly),
-          ),
-          const SizedBox(width: 10),
-          FilterDropdownPill<String>(
-            label: selectedArea == 'All Areas' ? 'Area' : selectedArea,
-            icon: Icons.map_outlined,
-            values: areaOptions,
-            labelBuilder: (value) => value,
-            onSelected: onAreaChanged,
-            selected: selectedArea != 'All Areas',
-          ),
-          const SizedBox(width: 12),
-          TextButton(onPressed: onClearFilters, child: const Text('Clear all')),
         ],
       ),
     );
   }
 }
 
-class FilterActionPill extends StatelessWidget {
-  const FilterActionPill({
+class BloodGroupFilterChip extends StatelessWidget {
+  const BloodGroupFilterChip({
     super.key,
     required this.label,
-    required this.icon,
     required this.selected,
     required this.onTap,
   });
 
   final String label;
-  final IconData icon;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return FilledButton.icon(
-      style: FilledButton.styleFrom(
-        backgroundColor: selected ? const Color(0xffd91522) : Colors.white,
-        foregroundColor: selected ? Colors.white : const Color(0xffd91522),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      onPressed: onTap,
-      icon: Icon(icon, size: 20),
-      label: Text(label),
-    );
-  }
-}
-
-class FilterDropdownPill<T> extends StatelessWidget {
-  const FilterDropdownPill({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.values,
-    required this.labelBuilder,
-    required this.onSelected,
-    required this.selected,
-  });
-
-  final String label;
-  final IconData icon;
-  final List<T> values;
-  final String Function(T value) labelBuilder;
-  final ValueChanged<T> onSelected;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<T>(
-      onSelected: onSelected,
-      itemBuilder: (context) => values
-          .map(
-            (value) => PopupMenuItem<T>(
-              value: value,
-              child: Text(labelBuilder(value)),
-            ),
-          )
-          .toList(),
-      child: Container(
-        height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xfffff3f3) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: selected ? const Color(0xffffd8d8) : const Color(0xffe8e2e2),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 20,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(15),
+        child: Ink(
+          width: double.infinity,
+          height: 38,
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xffe5161d) : Colors.white,
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(
               color: selected
-                  ? const Color(0xffd91522)
-                  : const Color(0xff5f626b),
+                  ? const Color(0xffe5161d)
+                  : const Color(0xffe6e3e8),
             ),
-            const SizedBox(width: 8),
-            Text(
+            boxShadow: selected
+                ? const [
+                    BoxShadow(
+                      color: Color(0x22e5161d),
+                      blurRadius: 10,
+                      offset: Offset(0, 5),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Center(
+            child: Text(
               label,
               style: TextStyle(
-                color: selected
-                    ? const Color(0xffc81521)
-                    : const Color(0xff343741),
-                fontWeight: FontWeight.w800,
+                color: selected ? Colors.white : Colors.black,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
               ),
             ),
-            const SizedBox(width: 10),
-            Icon(
-              selected ? Icons.close : Icons.keyboard_arrow_down,
-              size: 18,
-              color: selected
-                  ? const Color(0xffc81521)
-                  : const Color(0xff5f626b),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class ContactsListToolbar extends StatelessWidget {
-  const ContactsListToolbar({super.key, required this.foundCount});
+class SortMenuButton extends StatelessWidget {
+  const SortMenuButton({
+    super.key,
+    required this.selectedSort,
+    required this.onSortChanged,
+  });
 
-  final int foundCount;
+  final ContactsSortOption selectedSort;
+  final ValueChanged<ContactsSortOption> onSortChanged;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: RichText(
-                text: TextSpan(
-                  style: const TextStyle(
-                    color: Color(0xff2d2d35),
-                    fontSize: 17,
-                  ),
-                  children: [
-                    TextSpan(
-                      text: '$foundCount',
-                      style: const TextStyle(
-                        color: Color(0xff8e6c6c),
-                        fontSize: 26,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const TextSpan(text: ' contacts found'),
-                  ],
-                ),
-              ),
+    return PopupMenuButton<ContactsSortOption>(
+      tooltip: 'Sort contacts',
+      onSelected: onSortChanged,
+      itemBuilder: (context) => ContactsSortOption.values
+          .map(
+            (option) => PopupMenuItem(value: option, child: Text(option.label)),
+          )
+          .toList(),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _sortLabel(selectedSort),
+            style: const TextStyle(
+              color: Color(0xffe5161d),
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
             ),
-            IconButton(
-              tooltip: 'Filter options',
-              onPressed: () {},
-              icon: const Icon(Icons.tune),
-            ),
-          ],
-        ),
-        Row(
-          children: const [
-            Text('Sorted by: ', style: TextStyle(color: Color(0xff555560))),
-            Text(
-              'Recently added',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-            Icon(Icons.keyboard_arrow_down),
-          ],
-        ),
-      ],
+          ),
+          const SizedBox(width: 4),
+          const Icon(
+            Icons.keyboard_arrow_down,
+            size: 18,
+            color: Color(0xffe5161d),
+          ),
+        ],
+      ),
     );
+  }
+
+  String _sortLabel(ContactsSortOption option) {
+    return switch (option) {
+      ContactsSortOption.name => 'Name',
+      ContactsSortOption.date => 'Recently Added',
+      ContactsSortOption.lastDonationDate => 'Last Donation',
+    };
   }
 }
 
@@ -606,12 +627,14 @@ class DetailedContactTile extends StatelessWidget {
   const DetailedContactTile({
     super.key,
     required this.contact,
-    required this.onTap,
+    required this.onDetails,
+    required this.onEdit,
     required this.onDelete,
   });
 
   final BloodContact contact;
-  final VoidCallback onTap;
+  final VoidCallback onDetails;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   @override
@@ -620,13 +643,7 @@ class DetailedContactTile extends StatelessWidget {
         bloodGroupColors[contact.bloodGroup] ?? const Color(0xffe5161d);
     final statusColor = contact.isAvailable
         ? const Color(0xff16a34a)
-        : const Color(0xffd91522);
-    final statusText = contact.isAvailable ? 'Available' : 'Not available';
-    final statusNote = contact.isAvailable
-        ? 'Can donate now'
-        : 'Currently unavailable';
-    final distance = _distanceFor(contact);
-
+        : const Color(0xff737684);
     return Dismissible(
       key: ValueKey('details-${contact.id}'),
       direction: DismissDirection.endToStart,
@@ -636,150 +653,240 @@ class DetailedContactTile extends StatelessWidget {
         color: Theme.of(context).colorScheme.error,
         child: Icon(Icons.delete, color: Theme.of(context).colorScheme.onError),
       ),
-      onDismissed: (_) => onDelete(),
+      confirmDismiss: (_) async {
+        onDelete();
+        return false;
+      },
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(22),
+          onTap: onDetails,
+          onLongPress: () => _showLongPressActions(context),
+          borderRadius: BorderRadius.circular(10),
           child: Ink(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: const Color(0xffefeeee)),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xffeeeeee)),
               boxShadow: const [
                 BoxShadow(
-                  color: Color(0x10000000),
-                  blurRadius: 16,
-                  offset: Offset(0, 8),
+                  color: Color(0x0a000000),
+                  blurRadius: 8,
+                  offset: Offset(0, 3),
                 ),
               ],
             ),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 34,
-                  backgroundColor: groupColor.withValues(alpha: 0.14),
-                  foregroundColor: groupColor,
-                  child: Text(
-                    contact.initials,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 2, 8, 2),
+                    child: Row(
+                      children: [
+                        ContactAvatar(
+                          contact: contact,
+                          radius: 23,
+                          backgroundColor: groupColor.withValues(alpha: 0.12),
+                          foregroundColor: groupColor,
+                          textStyle: TextStyle(
+                            color: groupColor,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 9,
+                                    height: 9,
+                                    decoration: BoxDecoration(
+                                      color: statusColor,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 7),
+                                  Expanded(
+                                    child: Text(
+                                      contact.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.black,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  BloodGroupBadge(
+                                    group: contact.bloodGroup,
+                                    color: groupColor,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              ContactInfoLine(
+                                icon: Icons.phone_outlined,
+                                text: contact.phone,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  flex: 5,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              contact.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                          ),
-                          BloodGroupBadge(
-                            group: contact.bloodGroup,
-                            color: const Color(0xffe5161d),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 9),
-                      ContactInfoLine(icon: Icons.phone, text: contact.phone),
-                      const SizedBox(height: 7),
-                      ContactInfoLine(
-                        icon: Icons.location_on_outlined,
-                        text: '${contact.area}  •  $distance km',
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 4,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.circle, size: 10, color: statusColor),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              statusText,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: statusColor,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 9),
-                      Text(
-                        statusNote,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Color(0xff565660)),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Row(
+              SizedBox(
+                width: 64,
+                child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    CircleAvatar(
-                      radius: 30,
-                      backgroundColor: const Color(0xffd91522),
-                      child: IconButton(
-                        tooltip: 'Call',
-                        onPressed: () {},
-                        icon: const Icon(
-                          Icons.phone,
-                          color: Colors.white,
-                          size: 26,
-                        ),
-                      ),
+                    ContactQuickActionButton(
+                      tooltip: 'Call',
+                      icon: Icons.phone_outlined,
+                      backgroundColor: const Color(0xffeef9f0),
+                      foregroundColor: const Color(0xff16a34a),
+                      onPressed: () {},
                     ),
-                    const SizedBox(width: 10),
-                    CircleAvatar(
-                      radius: 30,
-                      backgroundColor: Colors.white,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xffe2e2e2)),
-                        ),
-                        child: IconButton(
-                          tooltip: 'Message',
-                          onPressed: () {},
-                          icon: const Icon(
-                            Icons.chat_bubble_outline,
-                            color: Color(0xffd91522),
-                          ),
-                        ),
-                      ),
+                    const SizedBox(height: 6),
+                    ContactQuickActionButton(
+                      tooltip: 'Share',
+                      icon: Icons.share_outlined,
+                      backgroundColor: const Color(0xfffff1f2),
+                      foregroundColor: const Color(0xffe5161d),
+                      onPressed: () => _shareContact(context, contact),
                     ),
                   ],
                 ),
+              ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _showLongPressActions(BuildContext context) async {
+    final action = await showModalBottomSheet<_ContactTileAction>(
+      context: context,
+      backgroundColor: Colors.white,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Details'),
+              onTap: () => Navigator.pop(context, _ContactTileAction.details),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit'),
+              onTap: () => Navigator.pop(context, _ContactTileAction.edit),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete'),
+              onTap: () => Navigator.pop(context, _ContactTileAction.delete),
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('Copy number'),
+              onTap: () => Navigator.pop(context, _ContactTileAction.copyNumber),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+
+    switch (action) {
+      case _ContactTileAction.details:
+        onDetails();
+      case _ContactTileAction.edit:
+        onEdit();
+      case _ContactTileAction.delete:
+        onDelete();
+      case _ContactTileAction.copyNumber:
+        Clipboard.setData(ClipboardData(text: contact.phone));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Phone number copied')),
+        );
+      case null:
+        break;
+    }
+  }
+
+  Future<void> _shareContact(BuildContext context, BloodContact contact) async {
+    final box = context.findRenderObject() as RenderBox?;
+    final note = contact.note.trim();
+    final remarks = note.isEmpty
+        ? 'Please contact directly before planning a donation.'
+        : note;
+
+    await SharePlus.instance.share(
+      ShareParams(
+        subject: 'Blood donor contact: ${contact.name}',
+        text:
+            '''
+Blood donor contact
+
+Name: ${contact.name}
+Blood group: ${contact.bloodGroup}
+Mobile: ${contact.phone}
+Area: ${contact.area}
+Remarks: $remarks
+'''
+                .trim(),
+        sharePositionOrigin: box == null
+            ? null
+            : box.localToGlobal(Offset.zero) & box.size,
+      ),
+    );
+  }
+}
+
+enum _ContactTileAction { details, edit, delete, copyNumber }
+
+class ContactQuickActionButton extends StatelessWidget {
+  const ContactQuickActionButton({
+    super.key,
+    required this.tooltip,
+    required this.icon,
+    required this.backgroundColor,
+    required this.foregroundColor,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final Color backgroundColor;
+  final Color foregroundColor;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 30,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          backgroundColor: backgroundColor,
+          foregroundColor: foregroundColor,
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        icon: Icon(icon, size: 16),
       ),
     );
   }
@@ -795,78 +902,17 @@ class ContactInfoLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: const Color(0xff5d606b)),
+        Icon(icon, size: 16, color: const Color(0xff343741)),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             text,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xff4d4f5a), fontSize: 15),
+            style: const TextStyle(color: Color(0xff343741), fontSize: 14),
           ),
         ),
       ],
-    );
-  }
-}
-
-String _distanceFor(BloodContact contact) {
-  final value = contact.id.codeUnits.fold<int>(0, (sum, code) => sum + code);
-  return (1 + (value % 24) / 10).toStringAsFixed(1);
-}
-
-class DataSafeCard extends StatelessWidget {
-  const DataSafeCard({super.key, required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
-        child: Ink(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: const Color(0xfffff1f1),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: const Color(0xffffd6d6)),
-          ),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.gpp_good_outlined,
-                color: Color(0xffd91522),
-                size: 38,
-              ),
-              const SizedBox(width: 18),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Your data is safe',
-                      style: TextStyle(
-                        color: Color(0xffb90f16),
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'All your contacts are stored locally on this device.',
-                      style: TextStyle(color: Color(0xff42424a), fontSize: 15),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Color(0xffb90f16)),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -876,27 +922,32 @@ class EmptyContactsList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 52, 24, 120),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.manage_search,
-            size: 54,
-            color: Theme.of(context).colorScheme.primary,
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight - 8),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.manage_search,
+                size: 54,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'No contacts match',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Change filters or add contacts to build your blood network.',
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          const Text(
-            'No contacts match',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Change filters or add contacts to build your blood network.',
-            textAlign: TextAlign.center,
-          ),
-        ],
+        ),
       ),
     );
   }

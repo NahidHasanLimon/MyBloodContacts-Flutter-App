@@ -1,3 +1,4 @@
+import 'package:blood_contacts/src/features/contacts/domain/blood_need_request.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_stats.dart';
@@ -12,13 +13,23 @@ class HomeOverviewPage extends StatelessWidget {
     required this.hasMoreContacts,
     required this.selectedBloodGroup,
     required this.selectedFilter,
+    required this.openNeedsCount,
+    required this.completedNeedsCount,
     required this.driveFolder,
     required this.onAdd,
-    required this.onImport,
+    required this.onNeed,
     required this.onDriveFolder,
     required this.onBloodGroupSelected,
     required this.onFilterChanged,
     required this.onViewAll,
+    required this.onAvailableContacts,
+    required this.onOpenNeeds,
+    required this.onCompletedNeeds,
+    required this.recentNeeds,
+    required this.onOpenRecentNeed,
+    required this.onViewAllNeeds,
+    required this.onNotifications,
+    required this.notificationCount,
     required this.onEditContact,
     required this.onDeleteContact,
   });
@@ -28,65 +39,99 @@ class HomeOverviewPage extends StatelessWidget {
   final bool hasMoreContacts;
   final String? selectedBloodGroup;
   final ContactFilter selectedFilter;
+  final int openNeedsCount;
+  final int completedNeedsCount;
   final String? driveFolder;
   final VoidCallback onAdd;
-  final VoidCallback onImport;
+  final VoidCallback onNeed;
   final VoidCallback onDriveFolder;
   final ValueChanged<String> onBloodGroupSelected;
   final ValueChanged<ContactFilter> onFilterChanged;
   final VoidCallback onViewAll;
+  final VoidCallback onAvailableContacts;
+  final VoidCallback onOpenNeeds;
+  final VoidCallback onCompletedNeeds;
+  final List<BloodNeedRequest> recentNeeds;
+  final ValueChanged<BloodNeedRequest> onOpenRecentNeed;
+  final VoidCallback onViewAllNeeds;
+  final VoidCallback onNotifications;
+  final int notificationCount;
   final ValueChanged<BloodContact> onEditContact;
   final ValueChanged<BloodContact> onDeleteContact;
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 12, 18, 98),
-        children: [
-          HomeHeader(onAdd: onAdd),
-          const SizedBox(height: 22),
-          NeedBloodCard(onTap: onImport),
-          const SizedBox(height: 22),
-          const SectionHeader(title: 'At a glance'),
-          const SizedBox(height: 10),
-          BloodGroupGrid(
-            counts: stats.groupCounts,
-            selectedGroup: selectedBloodGroup,
-            onSelected: onBloodGroupSelected,
-          ),
-          const SizedBox(height: 12),
-          TotalContactsCard(
-            count: stats.total,
-            driveFolder: driveFolder,
-            onTap: onDriveFolder,
-          ),
-          const SizedBox(height: 22),
-          const SectionHeader(title: 'Quick filters'),
-          const SizedBox(height: 10),
-          QuickFilterBar(
-            stats: stats,
-            selectedFilter: selectedFilter,
-            onChanged: onFilterChanged,
-          ),
-          const SizedBox(height: 22),
-          SectionHeader(
-            title: 'Recent contacts',
-            actionLabel: hasMoreContacts ? 'View all' : null,
-            onAction: onViewAll,
-          ),
-          const SizedBox(height: 8),
-          if (visibleContacts.isEmpty)
-            const EmptyRecentContacts()
-          else
-            ...visibleContacts.map(
-              (contact) => RecentContactTile(
-                contact: contact,
-                onTap: () => onEditContact(contact),
-                onDelete: () => onDeleteContact(contact),
+    return ColoredBox(
+      color: Colors.white,
+      child: SafeArea(
+        top: false,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            HomeHeroHeader(
+              onNeed: onNeed,
+              onNotifications: onNotifications,
+              notificationCount: notificationCount,
+            ),
+            const SizedBox(height: 36),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: SectionHeader(title: 'Overview'),
+            ),
+            const SizedBox(height: 0),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: OverviewStatsGrid(
+                stats: stats,
+                openNeedsCount: openNeedsCount,
+                completedNeedsCount: completedNeedsCount,
+                onTotalDonors: onViewAll,
+                onAvailable: onAvailableContacts,
+                onOpenNeeds: onOpenNeeds,
+                onCompletedHelps: onCompletedNeeds,
               ),
             ),
-        ],
+            const SizedBox(height: 28),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 18),
+              child: SectionHeader(title: 'Find Donors by Blood Group'),
+            ),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: BloodGroupGrid(
+                counts: stats.groupCounts,
+                selectedGroup: selectedBloodGroup,
+                onSelected: onBloodGroupSelected,
+              ),
+            ),
+            const SizedBox(height: 28),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 18),
+              child: SectionHeader(title: 'Quick Actions'),
+            ),
+            const SizedBox(height: 6),
+            QuickActionsScroller(onAdd: onAdd, onNeed: onNeed),
+            const SizedBox(height: 28),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: SectionHeader(
+                title: 'Recent Needs',
+                actionLabel: 'View all',
+                onAction: onViewAllNeeds,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: RecentNeedsList(
+                needs: recentNeeds,
+                onTapNeed: onOpenRecentNeed,
+              ),
+            ),
+            const SizedBox(height: 110),
+          ],
+        ),
       ),
     );
   }

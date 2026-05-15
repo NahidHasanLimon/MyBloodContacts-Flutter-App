@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:blood_contacts/src/features/contacts/domain/app_notification.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_need_request.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
@@ -12,13 +13,20 @@ class ContactsStore {
     : _databaseFactory = databaseFactory ?? sqflite.databaseFactory;
 
   static const _databaseName = 'blood_contacts.db';
-  static const _databaseVersion = 2;
+  static const _databaseVersion = 3;
   static const _contactsTable = 'contacts';
   static const _needsTable = 'needs';
+  static const _notificationsTable = 'notifications';
   static const _legacyContactsKey = 'blood_contacts.contacts';
   static const _legacyContactsMigratedKey =
       'blood_contacts.contacts_sqlite_migrated';
   static const _driveFolderKey = 'blood_contacts.drive_folder';
+  static const _driveEmailKey = 'blood_contacts.drive_email';
+  static const _syncHistoryKey = 'blood_contacts.sync_history';
+  static const _lastSyncStatusKey = 'blood_contacts.last_sync_status';
+  static const _notifySyncFailedKey = 'blood_contacts.notify_sync_failed';
+  static const _notifySyncStaleKey = 'blood_contacts.notify_sync_stale';
+  static const _onboardingCompletedKey = 'blood_contacts.onboarding_completed';
 
   final SharedPreferences _prefs;
   final sqflite.DatabaseFactory _databaseFactory;
@@ -27,6 +35,7 @@ class ContactsStore {
   Future<void> init() async {
     _database = await _openDatabase();
     await _migrateLegacyContacts();
+    await _dedupePersistedContacts();
   }
 
   Future<List<BloodContact>> loadContacts() async {
@@ -35,17 +44,30 @@ class ContactsStore {
       where: 'deleted_at IS NULL',
       orderBy: 'LOWER(name) ASC',
     );
-    return rows.map(_contactFromRow).toList()..sort(sortContacts);
+    return _dedupeContactsByNormalizedPhone(rows.map(_contactFromRow).toList());
+  }
+
+  Future<List<ContactSyncRecord>> exportContactSyncRecords() async {
+    final rows = await _db.query(_contactsTable);
+    return _dedupeContactRecordsByNormalizedPhone(
+      rows.map((row) {
+        return ContactSyncRecord(
+          contact: _contactFromRow(row),
+          deletedAt: DateTime.tryParse(row['deleted_at'] as String? ?? ''),
+        );
+      }).toList(),
+    );
   }
 
   Future<void> saveContacts(List<BloodContact> contacts) async {
+    final dedupedContacts = _dedupeContactsByNormalizedPhone(contacts);
     await _db.transaction((txn) async {
       final existingRows = await txn.query(
         _contactsTable,
         columns: ['id'],
         where: 'deleted_at IS NULL',
       );
-      final nextIds = contacts.map((contact) => contact.id).toSet();
+      final nextIds = dedupedContacts.map((contact) => contact.id).toSet();
 
       for (final row in existingRows) {
         final id = row['id'] as String;
@@ -62,7 +84,7 @@ class ContactsStore {
         }
       }
 
-      for (final contact in contacts) {
+      for (final contact in dedupedContacts) {
         await txn.insert(
           _contactsTable,
           _contactToRow(contact),
@@ -81,6 +103,16 @@ class ContactsStore {
 
     return rows.map(_needFromRow).toList()
       ..sort((a, b) => b.sortRank.compareTo(a.sortRank));
+  }
+
+  Future<List<NeedSyncRecord>> exportNeedSyncRecords() async {
+    final rows = await _db.query(_needsTable);
+    return rows.map((row) {
+      return NeedSyncRecord(
+        need: _needFromRow(row),
+        deletedAt: DateTime.tryParse(row['deleted_at'] as String? ?? ''),
+      );
+    }).toList();
   }
 
   Future<void> saveNeeds(
@@ -120,10 +152,179 @@ class ContactsStore {
     });
   }
 
+  Future<void> applySyncedSnapshot({
+    required List<ContactSyncRecord> contacts,
+    required List<NeedSyncRecord> needs,
+  }) async {
+    final syncedAt = DateTime.now().toIso8601String();
+    final dedupedContacts = _dedupeContactRecordsByNormalizedPhone(contacts);
+    await _db.transaction((txn) async {
+      final syncedContactIds = dedupedContacts
+          .map((record) => record.contact.id)
+          .toSet();
+      final existingContactRows = await txn.query(
+        _contactsTable,
+        columns: ['id'],
+        where: 'deleted_at IS NULL',
+      );
+
+      for (final row in existingContactRows) {
+        final id = row['id'] as String;
+        if (!syncedContactIds.contains(id)) {
+          await txn.update(
+            _contactsTable,
+            {
+              'deleted_at': syncedAt,
+              'sync_status': 'synced',
+              'last_synced_at': syncedAt,
+            },
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        }
+      }
+
+      for (final record in dedupedContacts) {
+        final row = _contactToRow(record.contact)
+          ..['deleted_at'] = record.deletedAt?.toIso8601String()
+          ..['sync_status'] = 'synced'
+          ..['last_synced_at'] = syncedAt;
+        await txn.insert(
+          _contactsTable,
+          row,
+          conflictAlgorithm: sqflite.ConflictAlgorithm.replace,
+        );
+      }
+
+      for (final record in needs) {
+        final row = _needToRow(record.need, markSynced: true)
+          ..['deleted_at'] = record.deletedAt?.toIso8601String()
+          ..['last_synced_at'] = syncedAt;
+        await txn.insert(
+          _needsTable,
+          row,
+          conflictAlgorithm: sqflite.ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
   String? loadDriveFolder() => _prefs.getString(_driveFolderKey);
 
   Future<void> saveDriveFolder(String folderName) {
     return _prefs.setString(_driveFolderKey, folderName);
+  }
+
+  String? loadDriveEmail() => _prefs.getString(_driveEmailKey);
+
+  Future<void> saveDriveEmail(String email) {
+    return _prefs.setString(_driveEmailKey, email);
+  }
+
+  Future<void> clearDriveConnection() async {
+    await _prefs.remove(_driveFolderKey);
+    await _prefs.remove(_driveEmailKey);
+    await _prefs.remove(_lastSyncStatusKey);
+  }
+
+  String? loadLastSyncStatus() => _prefs.getString(_lastSyncStatusKey);
+
+  Future<void> saveLastSyncStatus(String status) {
+    return _prefs.setString(_lastSyncStatusKey, status);
+  }
+
+  List<DateTime> loadSyncHistory() {
+    final values = _prefs.getStringList(_syncHistoryKey) ?? const [];
+    return values.map(DateTime.tryParse).whereType<DateTime>().toList()
+      ..sort((a, b) => b.compareTo(a));
+  }
+
+  Future<void> addSyncHistory(DateTime syncedAt) async {
+    final nextHistory = [
+      syncedAt.toIso8601String(),
+      ...loadSyncHistory().map((date) => date.toIso8601String()),
+    ];
+    await _prefs.setStringList(_syncHistoryKey, nextHistory);
+  }
+
+  bool loadNotifySyncFailedEnabled() =>
+      _prefs.getBool(_notifySyncFailedKey) ?? true;
+
+  Future<void> saveNotifySyncFailedEnabled(bool enabled) {
+    return _prefs.setBool(_notifySyncFailedKey, enabled);
+  }
+
+  bool loadNotifySyncStaleEnabled() =>
+      _prefs.getBool(_notifySyncStaleKey) ?? true;
+
+  Future<void> saveNotifySyncStaleEnabled(bool enabled) {
+    return _prefs.setBool(_notifySyncStaleKey, enabled);
+  }
+
+  bool loadOnboardingCompleted() =>
+      _prefs.getBool(_onboardingCompletedKey) ?? false;
+
+  Future<void> saveOnboardingCompleted(bool completed) {
+    return _prefs.setBool(_onboardingCompletedKey, completed);
+  }
+
+  Future<List<AppNotification>> loadNotifications() async {
+    final rows = await _db.query(
+      _notificationsTable,
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(_notificationFromRow).toList();
+  }
+
+  Future<int> unreadNotificationsCount() async {
+    final rows = await _db.rawQuery(
+      'SELECT COUNT(*) as count FROM $_notificationsTable WHERE read_at IS NULL',
+    );
+    return (rows.first['count'] as int?) ?? 0;
+  }
+
+  Future<void> upsertNotification({
+    required String code,
+    required String title,
+    required String message,
+    DateTime? createdAt,
+  }) async {
+    final now = createdAt ?? DateTime.now();
+    await _db.insert(_notificationsTable, {
+      'code': code,
+      'title': title,
+      'message': message,
+      'created_at': now.toIso8601String(),
+      'read_at': null,
+    }, conflictAlgorithm: sqflite.ConflictAlgorithm.replace);
+  }
+
+  Future<void> deleteNotificationByCode(String code) async {
+    await _db.delete(_notificationsTable, where: 'code = ?', whereArgs: [code]);
+  }
+
+  Future<void> markAllNotificationsRead() async {
+    await _db.update(_notificationsTable, {
+      'read_at': DateTime.now().toIso8601String(),
+    }, where: 'read_at IS NULL');
+  }
+
+  Future<void> markNotificationRead(int id) async {
+    await _db.update(
+      _notificationsTable,
+      {'read_at': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> markNotificationUnread(int id) async {
+    await _db.update(
+      _notificationsTable,
+      {'read_at': null},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<sqflite.Database> _openDatabase() async {
@@ -138,6 +339,9 @@ class ContactsStore {
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
             await _upgradeNeedsSchemaV2(db);
+          }
+          if (oldVersion < 3) {
+            await _createNotificationsSchemaV3(db);
           }
         },
       ),
@@ -195,6 +399,7 @@ CREATE TABLE $_needsTable (
     await db.execute(
       'CREATE INDEX idx_needs_sort_rank ON $_needsTable(sort_rank)',
     );
+    await _createNotificationsSchemaV3(db);
   }
 
   Future<void> _upgradeNeedsSchemaV2(sqflite.DatabaseExecutor db) async {
@@ -221,6 +426,25 @@ CREATE TABLE $_needsTable (
     );
   }
 
+  Future<void> _createNotificationsSchemaV3(sqflite.DatabaseExecutor db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS $_notificationsTable (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+)
+''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON $_notificationsTable(created_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_notifications_read_at ON $_notificationsTable(read_at)',
+    );
+  }
+
   Future<void> _migrateLegacyContacts() async {
     if (_prefs.getBool(_legacyContactsMigratedKey) ?? false) return;
 
@@ -242,6 +466,28 @@ CREATE TABLE $_needsTable (
     await _prefs.setBool(_legacyContactsMigratedKey, true);
   }
 
+  Future<void> _dedupePersistedContacts() async {
+    final rows = await _db.query(_contactsTable, where: 'deleted_at IS NULL');
+    final contacts = rows.map(_contactFromRow).toList();
+    final keepIds = _dedupeContactsByNormalizedPhone(
+      contacts,
+    ).map((contact) => contact.id).toSet();
+    if (keepIds.length == contacts.length) return;
+
+    final deletedAt = DateTime.now().toIso8601String();
+    await _db.transaction((txn) async {
+      for (final contact in contacts) {
+        if (keepIds.contains(contact.id)) continue;
+        await txn.update(
+          _contactsTable,
+          {'deleted_at': deletedAt, 'sync_status': 'pending_delete'},
+          where: 'id = ?',
+          whereArgs: [contact.id],
+        );
+      }
+    });
+  }
+
   sqflite.Database get _db {
     final database = _database;
     if (database == null) {
@@ -251,11 +497,63 @@ CREATE TABLE $_needsTable (
   }
 }
 
+class ContactSyncRecord {
+  const ContactSyncRecord({required this.contact, this.deletedAt});
+
+  final BloodContact contact;
+  final DateTime? deletedAt;
+
+  DateTime get versionTime {
+    final deleted = deletedAt;
+    if (deleted != null && deleted.isAfter(contact.updatedAt)) return deleted;
+    return contact.updatedAt;
+  }
+
+  Map<String, Object?> toJson() {
+    return {
+      'data': contact.toJson(),
+      'deletedAt': deletedAt?.toIso8601String(),
+    };
+  }
+
+  factory ContactSyncRecord.fromJson(Map<String, Object?> json) {
+    return ContactSyncRecord(
+      contact: BloodContact.fromJson(json['data'] as Map<String, Object?>),
+      deletedAt: DateTime.tryParse(json['deletedAt'] as String? ?? ''),
+    );
+  }
+}
+
+class NeedSyncRecord {
+  const NeedSyncRecord({required this.need, this.deletedAt});
+
+  final BloodNeedRequest need;
+  final DateTime? deletedAt;
+
+  DateTime get versionTime {
+    final deleted = deletedAt;
+    if (deleted != null && deleted.isAfter(need.updatedAt)) return deleted;
+    return need.updatedAt;
+  }
+
+  Map<String, Object?> toJson() {
+    return {'data': need.toJson(), 'deletedAt': deletedAt?.toIso8601String()};
+  }
+
+  factory NeedSyncRecord.fromJson(Map<String, Object?> json) {
+    return NeedSyncRecord(
+      need: BloodNeedRequest.fromJson(json['data'] as Map<String, Object?>),
+      deletedAt: DateTime.tryParse(json['deletedAt'] as String? ?? ''),
+    );
+  }
+}
+
 Map<String, Object?> _contactToRow(BloodContact contact) {
+  final normalizedPhone = normalizedPhoneNumber(contact.phone);
   return {
     'id': contact.id,
     'name': contact.name,
-    'phone': contact.phone,
+    'phone': normalizedPhone,
     'email': contact.email,
     'photo_path': contact.photoPath,
     'photo_base64': contact.photoBase64,
@@ -271,10 +569,11 @@ Map<String, Object?> _contactToRow(BloodContact contact) {
 }
 
 BloodContact _contactFromRow(Map<String, Object?> row) {
+  final normalizedPhone = normalizedPhoneNumber(row['phone'] as String? ?? '');
   return BloodContact(
     id: row['id'] as String,
     name: row['name'] as String,
-    phone: row['phone'] as String,
+    phone: normalizedPhone,
     email: row['email'] as String? ?? '',
     photoPath: row['photo_path'] as String?,
     photoBase64: row['photo_base64'] as String?,
@@ -315,4 +614,61 @@ Map<String, Object?> _needToRow(
 BloodNeedRequest _needFromRow(Map<String, Object?> row) {
   final payload = jsonDecode(row['payload_json'] as String);
   return BloodNeedRequest.fromJson(payload as Map<String, Object?>);
+}
+
+AppNotification _notificationFromRow(Map<String, Object?> row) {
+  return AppNotification(
+    id: row['id'] as int? ?? 0,
+    code: row['code'] as String? ?? '',
+    title: row['title'] as String? ?? '',
+    message: row['message'] as String? ?? '',
+    createdAt:
+        DateTime.tryParse(row['created_at'] as String? ?? '') ??
+        DateTime.fromMillisecondsSinceEpoch(0),
+    readAt: DateTime.tryParse(row['read_at'] as String? ?? ''),
+  );
+}
+
+List<BloodContact> _dedupeContactsByNormalizedPhone(
+  List<BloodContact> contacts,
+) {
+  final byPhone = <String, BloodContact>{};
+  final contactsWithoutPhone = <BloodContact>[];
+
+  for (final contact in contacts) {
+    final phone = normalizedPhoneNumber(contact.phone);
+    if (phone.isEmpty) {
+      contactsWithoutPhone.add(contact);
+      continue;
+    }
+
+    final existing = byPhone[phone];
+    if (existing == null || contact.updatedAt.isAfter(existing.updatedAt)) {
+      byPhone[phone] = contact;
+    }
+  }
+
+  return [...contactsWithoutPhone, ...byPhone.values]..sort(sortContacts);
+}
+
+List<ContactSyncRecord> _dedupeContactRecordsByNormalizedPhone(
+  List<ContactSyncRecord> records,
+) {
+  final byPhone = <String, ContactSyncRecord>{};
+  final recordsWithoutPhone = <ContactSyncRecord>[];
+
+  for (final record in records) {
+    final phone = normalizedPhoneNumber(record.contact.phone);
+    if (phone.isEmpty) {
+      recordsWithoutPhone.add(record);
+      continue;
+    }
+
+    final existing = byPhone[phone];
+    if (existing == null || record.versionTime.isAfter(existing.versionTime)) {
+      byPhone[phone] = record;
+    }
+  }
+
+  return [...recordsWithoutPhone, ...byPhone.values];
 }

@@ -1,8 +1,11 @@
 import 'package:blood_contacts/src/app/app_theme.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_need_request.dart';
+import 'package:blood_contacts/src/features/contacts/presentation/pages/new_need_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class NeedDetailsPage extends StatefulWidget {
   const NeedDetailsPage({
@@ -32,6 +35,10 @@ class _NeedDetailsPageState extends State<NeedDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final red = _need.urgency.color;
+    final actionsLocked =
+        _need.status == NeedStatus.fulfilled ||
+        _need.status == NeedStatus.closed ||
+        _need.status == NeedStatus.cancelled;
 
     return Scaffold(
       backgroundColor: const Color(0xfffbfaf8),
@@ -39,41 +46,38 @@ class _NeedDetailsPageState extends State<NeedDetailsPage> {
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
               sliver: SliverList.list(
                 children: [
                   _NeedDetailsHeader(
                     onBack: () => Navigator.pop(context),
                     onShare: () => _shareNeed(context),
-                    onClose: () => _closeRequest(context),
+                    onEdit: actionsLocked ? null : () => _editNeed(context),
+                    onClose: actionsLocked
+                        ? null
+                        : () => _closeRequest(context),
+                    onCancel: actionsLocked
+                        ? null
+                        : () => _cancelRequest(context),
                   ),
-                  const SizedBox(height: 18),
-                  _UrgencyBanner(need: _need),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _NeedSummaryCard(need: _need, red: red),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
                   _InfoCard(
                     icon: Icons.business_outlined,
                     title: 'Hospital',
                     child: _HospitalContent(need: _need),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
                   _InfoCard(
                     icon: Icons.assignment_turned_in_outlined,
                     title: 'Status',
                     child: _StatusContent(need: _need),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
                   _PotentialDonorsCard(
                     count: 0,
                     onViewAll: () => _showPotentialDonors(context),
-                  ),
-                  const SizedBox(height: 14),
-                  _ActionsCard(
-                    canMarkFulfilled: _need.status != NeedStatus.fulfilled,
-                    canClose: _need.status != NeedStatus.cancelled,
-                    onFulfilled: () => _markFulfilled(context),
-                    onClose: () => _closeRequest(context),
                   ),
                 ],
               ),
@@ -84,48 +88,144 @@ class _NeedDetailsPageState extends State<NeedDetailsPage> {
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _showComingSoon(context, 'Save request'),
-                  icon: const Icon(Icons.favorite_border),
-                  label: const Text('Save'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(58),
-                    foregroundColor: Colors.black,
-                    textStyle: const TextStyle(
-                      fontSize: AppFontSizes.buttonText,
-                      fontWeight: FontWeight.w900,
-                    ),
-                    side: const BorderSide(color: Color(0xffd8dbe3)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _need.status.tint,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  'Current: ${_need.status.label}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: _need.status.color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: () =>
-                      _showComingSoon(context, 'Call contact person'),
-                  icon: const Icon(Icons.call),
-                  label: const Text('Call Now'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(58),
-                    backgroundColor: const Color(0xffe5161d),
-                    foregroundColor: Colors.white,
-                    textStyle: const TextStyle(
-                      fontSize: AppFontSizes.buttonText,
-                      fontWeight: FontWeight.w900,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: actionsLocked
+                          ? null
+                          : () => _cancelRequest(context),
+                      icon: const Icon(Icons.block_outlined),
+                      label: Text(
+                        _need.status == NeedStatus.cancelled
+                            ? 'Cancelled'
+                            : 'Cancel',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                        foregroundColor: const Color(0xff6f7480),
+                        disabledForegroundColor:
+                            _need.status == NeedStatus.cancelled
+                            ? const Color(0xff6f7480)
+                            : null,
+                        backgroundColor: _need.status == NeedStatus.cancelled
+                            ? const Color(0xfff1f2f4)
+                            : Colors.white,
+                        disabledBackgroundColor:
+                            _need.status == NeedStatus.cancelled
+                            ? const Color(0xfff1f2f4)
+                            : null,
+                        iconColor: const Color(0xffd97706),
+                        textStyle: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                        side: const BorderSide(color: Color(0xffd8dbe3)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: actionsLocked
+                          ? null
+                          : () => _closeRequest(context),
+                      icon: const Icon(Icons.cancel_outlined),
+                      label: Text(
+                        _need.status == NeedStatus.closed ? 'Closed' : 'Close',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                        foregroundColor: _need.status == NeedStatus.closed
+                            ? const Color(0xff374151)
+                            : Colors.black,
+                        disabledForegroundColor:
+                            _need.status == NeedStatus.closed
+                            ? const Color(0xff374151)
+                            : null,
+                        backgroundColor: _need.status == NeedStatus.closed
+                            ? const Color(0xffeef1f5)
+                            : Colors.white,
+                        disabledBackgroundColor:
+                            _need.status == NeedStatus.closed
+                            ? const Color(0xffeef1f5)
+                            : null,
+                        iconColor: const Color(0xffe5161d),
+                        textStyle: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                        side: const BorderSide(color: Color(0xffd8dbe3)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: actionsLocked
+                          ? null
+                          : () => _markFulfilled(context),
+                      icon: const Icon(Icons.check_circle_outline),
+                      label: Text(
+                        _need.status == NeedStatus.fulfilled
+                            ? 'Fulfilled'
+                            : 'Fulfilled',
+                      ),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                        backgroundColor: const Color(0xff16a34a),
+                        disabledBackgroundColor:
+                            _need.status == NeedStatus.fulfilled
+                            ? const Color(0xff16a34a)
+                            : null,
+                        foregroundColor: Colors.white,
+                        disabledForegroundColor:
+                            _need.status == NeedStatus.fulfilled
+                            ? Colors.white
+                            : null,
+                        iconColor: const Color(0xffeafff2),
+                        textStyle: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -219,7 +319,7 @@ Description: ${_need.summary}
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Close request?'),
-        content: const Text('This need will be marked as cancelled.'),
+        content: const Text('This need will be marked as closed.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -235,7 +335,7 @@ Description: ${_need.summary}
     if (confirmed != true || !context.mounted) return;
 
     final updated = _need.copyWith(
-      status: NeedStatus.cancelled,
+      status: NeedStatus.closed,
       updatedAt: DateTime.now(),
     );
     setState(() => _need = updated);
@@ -245,10 +345,44 @@ Description: ${_need.summary}
     ).showSnackBar(const SnackBar(content: Text('Request closed.')));
   }
 
-  void _showComingSoon(BuildContext context, String label) {
+  Future<void> _cancelRequest(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel request?'),
+        content: const Text('This need will be marked as cancelled.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Back'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancel Request'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final updated = _need.copyWith(
+      status: NeedStatus.cancelled,
+      updatedAt: DateTime.now(),
+    );
+    setState(() => _need = updated);
+    widget.onChanged(updated);
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('$label will be connected soon.')));
+    ).showSnackBar(const SnackBar(content: Text('Request cancelled.')));
+  }
+
+  Future<void> _editNeed(BuildContext context) async {
+    final updated = await Navigator.of(context).push<BloodNeedRequest>(
+      MaterialPageRoute(builder: (context) => NewNeedPage(initialNeed: _need)),
+    );
+    if (updated == null || !context.mounted) return;
+    setState(() => _need = updated);
+    widget.onChanged(updated);
   }
 }
 
@@ -256,12 +390,16 @@ class _NeedDetailsHeader extends StatelessWidget {
   const _NeedDetailsHeader({
     required this.onBack,
     required this.onShare,
+    required this.onEdit,
     required this.onClose,
+    required this.onCancel,
   });
 
   final VoidCallback onBack;
   final VoidCallback onShare;
-  final VoidCallback onClose;
+  final VoidCallback? onEdit;
+  final VoidCallback? onClose;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -292,14 +430,32 @@ class _NeedDetailsHeader extends StatelessWidget {
           icon: const Icon(Icons.more_vert, color: Color(0xff252a3a)),
           onSelected: (action) {
             switch (action) {
+              case _NeedAction.edit:
+                onEdit?.call();
+                break;
               case _NeedAction.close:
-                onClose();
+                onClose?.call();
+                break;
+              case _NeedAction.cancel:
+                onCancel?.call();
+                break;
             }
           },
-          itemBuilder: (context) => const [
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: _NeedAction.edit,
+              enabled: onEdit != null,
+              child: const Text('Edit Request'),
+            ),
+            PopupMenuItem(
+              value: _NeedAction.cancel,
+              enabled: onCancel != null,
+              child: const Text('Cancel Request'),
+            ),
             PopupMenuItem(
               value: _NeedAction.close,
-              child: Text('Close Request'),
+              enabled: onClose != null,
+              child: const Text('Close Request'),
             ),
           ],
         ),
@@ -308,54 +464,7 @@ class _NeedDetailsHeader extends StatelessWidget {
   }
 }
 
-enum _NeedAction { close }
-
-class _UrgencyBanner extends StatelessWidget {
-  const _UrgencyBanner({required this.need});
-
-  final BloodNeedRequest need;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-      decoration: _cardDecoration(color: const Color(0xfffff0f1)),
-      child: Row(
-        children: [
-          Icon(Icons.water_drop_outlined, color: need.urgency.color, size: 40),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${need.urgency.label} Need',
-                  style: TextStyle(
-                    color: need.urgency.color,
-                    fontSize: AppFontSizes.cardTitle,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  'Request ID: ${_requestCode(need)}',
-                  style: const TextStyle(
-                    color: Color(0xff4b5262),
-                    fontSize: AppFontSizes.smallMetadata,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          _UrgencyChip(need: need),
-          const SizedBox(width: 10),
-          Icon(Icons.notifications_none, color: need.urgency.color),
-        ],
-      ),
-    );
-  }
-}
+enum _NeedAction { edit, close, cancel }
 
 class _NeedSummaryCard extends StatelessWidget {
   const _NeedSummaryCard({required this.need, required this.red});
@@ -366,26 +475,50 @@ class _NeedSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 6),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 4),
       decoration: _cardDecoration(),
       child: Column(
         children: [
           Row(
             children: [
+              Text(
+                '${need.urgency.label} Need',
+                style: TextStyle(
+                  color: need.urgency.color,
+                  fontSize: AppFontSizes.cardTitle,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _requestCode(need),
+                style: const TextStyle(
+                  color: Color(0xff4b5262),
+                  fontSize: AppFontSizes.smallMetadata,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: Color(0xffeeeef3)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
               SizedBox(
-                width: 86,
-                height: 86,
+                width: 68,
+                height: 68,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    Icon(Icons.water_drop, color: red, size: 86),
+                    Icon(Icons.water_drop, color: red, size: 68),
                     Padding(
-                      padding: const EdgeInsets.only(top: 12),
+                      padding: const EdgeInsets.only(top: 9),
                       child: Text(
                         need.bloodGroup,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 23,
+                          fontSize: 17,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -393,7 +526,7 @@ class _NeedSummaryCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 18),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -407,13 +540,19 @@ class _NeedSummaryCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 7),
-                    Text(
-                      need.bloodGroup,
-                      style: TextStyle(
-                        color: red,
-                        fontSize: 32,
-                        fontWeight: FontWeight.w900,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          need.bloodGroup,
+                          style: TextStyle(
+                            color: red,
+                            fontSize: 25,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _StatusChip(status: need.status),
+                      ],
                     ),
                   ],
                 ),
@@ -433,7 +572,7 @@ class _NeedSummaryCard extends StatelessWidget {
             icon: Icons.person_outline,
             label: 'Contact Person',
             title: need.requester,
-            subtitle: need.phone,
+            trailing: _PhoneTrailing(phone: need.phone),
           ),
           const _SectionDivider(),
           Row(
@@ -460,7 +599,7 @@ class _NeedSummaryCard extends StatelessWidget {
             icon: Icons.person_outline,
             label: 'Requested By',
             title: need.requester,
-            trailing: const _VerifiedChip(),
+            trailing: _PhoneTrailing(phone: need.phone),
             subtitle: 'Requested date: ${_formatRequestedDate(need.updatedAt)}',
           ),
           const _SectionDivider(),
@@ -474,6 +613,94 @@ class _NeedSummaryCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _PhoneTrailing extends StatelessWidget {
+  const _PhoneTrailing({required this.phone});
+
+  final String phone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          phone,
+          style: const TextStyle(
+            color: Color(0xff343741),
+            fontSize: AppFontSizes.bodyText,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 28,
+          height: 28,
+          child: IconButton(
+            tooltip: 'Call contact',
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _confirmCall(context, phone),
+            icon: const Icon(
+              Icons.call,
+              size: 16,
+              color: Color(0xff16a34a),
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        SizedBox(
+          width: 28,
+          height: 28,
+          child: IconButton(
+            tooltip: 'Copy contact',
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: phone));
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('Contact copied')));
+            },
+            icon: const Icon(
+              Icons.content_copy,
+              size: 16,
+              color: Color(0xff5f6470),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Future<void> _confirmCall(BuildContext context, String phone) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Call contact?'),
+      content: Text('Do you want to call $phone?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('No'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Call'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  final uri = Uri(scheme: 'tel', path: phone);
+  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Could not open dialer')));
   }
 }
 
@@ -491,7 +718,7 @@ class _InfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -512,7 +739,7 @@ class _InfoCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           child,
         ],
       ),
@@ -559,18 +786,21 @@ class _StatusContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
         _StatusChip(status: need.status),
-        const SizedBox(height: 12),
-        Text(
-          _statusDescription(need.status),
-          style: const TextStyle(
-            color: Color(0xff343741),
-            fontSize: AppFontSizes.bodyText,
-            height: 1.35,
-            fontWeight: FontWeight.w600,
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            _statusDescription(need.status),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xff343741),
+              fontSize: AppFontSizes.bodyText,
+              height: 1.2,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ],
@@ -587,7 +817,7 @@ class _PotentialDonorsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: _cardDecoration(),
       child: Column(
         children: [
@@ -732,92 +962,6 @@ class _DonorSelectionSheet extends StatelessWidget {
   }
 }
 
-class _ActionsCard extends StatelessWidget {
-  const _ActionsCard({
-    required this.canMarkFulfilled,
-    required this.canClose,
-    required this.onFulfilled,
-    required this.onClose,
-  });
-
-  final bool canMarkFulfilled;
-  final bool canClose;
-  final VoidCallback onFulfilled;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return _InfoCard(
-      icon: Icons.task_outlined,
-      title: 'Actions',
-      child: Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: [
-          _ActionButton(
-            icon: Icons.check_circle_outline,
-            label: 'Mark Fulfilled',
-            color: const Color(0xff1d74e8),
-            onTap: canMarkFulfilled ? onFulfilled : null,
-          ),
-          _ActionButton(
-            icon: Icons.cancel_outlined,
-            label: 'Close Request',
-            onTap: canClose ? onClose : null,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.color = const Color(0xff343741),
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 116,
-      height: 94,
-      child: OutlinedButton(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: color,
-          side: const BorderSide(color: Color(0xffe6e8ef)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 28),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: AppFontSizes.smallMetadata,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _DetailRow extends StatelessWidget {
   const _DetailRow({
     required this.icon,
@@ -852,12 +996,15 @@ class _DetailRow extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Flexible(
+                  Expanded(
                     child: Text(
                       title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.black,
                         fontSize: AppFontSizes.cardTitle,
@@ -867,13 +1014,13 @@ class _DetailRow extends StatelessWidget {
                     ),
                   ),
                   if (trailing != null) ...[
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 14),
                     trailing!,
                   ],
                 ],
               ),
               if (subtitle != null) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   subtitle!,
                   style: const TextStyle(
@@ -972,13 +1119,7 @@ class _Requirements extends StatelessWidget {
           label: 'Units Needed:',
           value: '${need.units} ${need.units == 1 ? 'Unit' : 'Units'}',
         ),
-        const _RequirementLine(label: 'Type:', value: 'Whole Blood'),
         _RequirementLine(label: 'Urgency:', value: need.urgency.label),
-        const _RequirementLine(label: 'Age Group:', value: '18 - 60 years'),
-        const _RequirementLine(
-          label: 'Health Condition:',
-          value: 'Good health preferred',
-        ),
       ],
     );
   }
@@ -1025,39 +1166,6 @@ class _RequirementLine extends StatelessWidget {
   }
 }
 
-class _UrgencyChip extends StatelessWidget {
-  const _UrgencyChip({required this.need});
-
-  final BloodNeedRequest need;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xffffd5d8)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(need.urgency.icon, color: need.urgency.color, size: 15),
-          const SizedBox(width: 6),
-          Text(
-            need.urgency.label,
-            style: TextStyle(
-              color: need.urgency.color,
-              fontSize: AppFontSizes.smallMetadata,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _UnitsPill extends StatelessWidget {
   const _UnitsPill({required this.units});
 
@@ -1066,31 +1174,18 @@ class _UnitsPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: const Color(0xffffeef0),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Column(
-        children: [
-          Text(
-            '$units ${units == 1 ? 'Unit' : 'Units'}',
-            style: const TextStyle(
-              color: Color(0xffe5161d),
-              fontSize: AppFontSizes.cardTitle,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Units Needed',
-            style: TextStyle(
-              color: Color(0xff343741),
-              fontSize: AppFontSizes.smallMetadata,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
+      child: Text(
+        '$units ${units == 1 ? 'Unit' : 'Units'}',
+        style: const TextStyle(
+          color: Color(0xffe5161d),
+          fontSize: AppFontSizes.bodyText,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -1121,36 +1216,13 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
-class _VerifiedChip extends StatelessWidget {
-  const _VerifiedChip();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xffeaf8ed),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Text(
-        'Verified',
-        style: TextStyle(
-          color: Color(0xff119048),
-          fontSize: AppFontSizes.smallMetadata,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    );
-  }
-}
-
 class _SectionDivider extends StatelessWidget {
   const _SectionDivider();
 
   @override
   Widget build(BuildContext context) {
     return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 18),
+      padding: EdgeInsets.symmetric(vertical: 12),
       child: Divider(height: 1, color: Color(0xffeeeef3)),
     );
   }
@@ -1199,8 +1271,8 @@ String _formatRequestedDate(DateTime date) {
 String _statusDescription(NeedStatus status) {
   return switch (status) {
     NeedStatus.open => 'This request is open and looking for donors.',
-    NeedStatus.inProgress => 'This request is currently being coordinated.',
     NeedStatus.fulfilled => 'This request has been fulfilled.',
+    NeedStatus.closed => 'This request has been closed.',
     NeedStatus.cancelled => 'This request has been cancelled.',
   };
 }

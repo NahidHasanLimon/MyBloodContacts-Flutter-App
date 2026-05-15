@@ -1,4 +1,4 @@
-package com.example.blood_contacts
+package com.nhlimon.bloodcontacts
 
 import io.flutter.embedding.android.FlutterActivity
 

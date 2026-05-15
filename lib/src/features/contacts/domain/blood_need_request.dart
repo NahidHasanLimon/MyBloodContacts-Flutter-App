@@ -133,8 +133,8 @@ enum NeedUrgency {
 
 enum NeedStatus {
   open('Open', Color(0xff16a34a), Color(0xffeef9f0)),
-  inProgress('In Progress', Color(0xffff8a00), Color(0xfffff5e6)),
   fulfilled('Fulfilled', Color(0xff1d74e8), Color(0xffedf4ff)),
+  closed('Closed', Color(0xff4b5563), Color(0xffeef1f5)),
   cancelled('Cancelled', Color(0xff6f7480), Color(0xfff1f2f4));
 
   const NeedStatus(this.label, this.color, this.tint);
