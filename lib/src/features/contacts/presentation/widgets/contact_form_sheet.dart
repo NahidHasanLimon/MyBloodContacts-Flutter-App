@@ -3,8 +3,10 @@ import 'dart:typed_data';
 
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/contact_constants.dart';
+import 'package:blood_contacts/src/features/contacts/presentation/widgets/contact_common_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as phone_contacts;
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
 
 class AddBloodContactBottomSheet extends StatefulWidget {
@@ -24,6 +26,8 @@ class AddBloodContactBottomSheet extends StatefulWidget {
 
 class _AddBloodContactBottomSheetState
     extends State<AddBloodContactBottomSheet> {
+  static const int _maxPhotoBytes = 1024 * 1024;
+
   final _formKey = GlobalKey<FormState>();
   final _picker = ImagePicker();
   final _nameController = TextEditingController();
@@ -42,6 +46,7 @@ class _AddBloodContactBottomSheetState
   Uint8List? _photoBytes;
   String? _photoError;
   String? _phoneDuplicateError;
+  bool _removedContactPhotoDueToSize = false;
 
   bool get _isEditing => widget.contact != null;
 
@@ -132,17 +137,18 @@ class _AddBloodContactBottomSheetState
     }
 
     final bytes = await image.readAsBytes();
-    const maxBytes = 5 * 1024 * 1024;
-    if (bytes.length > maxBytes) {
-      setState(() => _photoError = 'Image must be smaller than 5 MB.');
+    final compressed = await _compressPhotoToLimit(bytes);
+    if (compressed == null) {
+      setState(() => _photoError = 'Image must be 1 MB or smaller.');
       return;
     }
 
     setState(() {
       _photoPath = image.path;
       _photoName = image.name;
-      _photoBytes = bytes;
+      _photoBytes = compressed;
       _photoError = null;
+      _removedContactPhotoDueToSize = false;
     });
   }
 
@@ -152,6 +158,7 @@ class _AddBloodContactBottomSheetState
       _photoName = null;
       _photoBytes = null;
       _photoError = null;
+      _removedContactPhotoDueToSize = false;
     });
   }
 
@@ -181,6 +188,13 @@ class _AddBloodContactBottomSheetState
     );
     if (selected == null || !mounted) return;
 
+    final photo = selected.photo;
+    final selectedPhotoBytes = photo?.fullSize ?? photo?.thumbnail;
+    final compressedPhotoBytes = selectedPhotoBytes == null
+        ? null
+        : await _compressPhotoToLimit(selectedPhotoBytes);
+    final removedPhoto = selectedPhotoBytes != null && compressedPhotoBytes == null;
+
     setState(() {
       _manualMode = false;
       _nameController.text = selected.displayName ?? '';
@@ -193,12 +207,16 @@ class _AddBloodContactBottomSheetState
       if (selected.emails.isNotEmpty) {
         _emailController.text = selected.emails.first.address;
       }
-      final photo = selected.photo;
-      final photoBytes = photo?.fullSize ?? photo?.thumbnail;
-      if (photoBytes != null) {
-        _photoBytes = photoBytes;
+      if (compressedPhotoBytes != null) {
+        _photoBytes = compressedPhotoBytes;
         _photoPath = null;
         _photoName = 'Contact photo';
+        _removedContactPhotoDueToSize = false;
+      } else if (removedPhoto) {
+        _photoBytes = null;
+        _photoPath = null;
+        _photoName = null;
+        _removedContactPhotoDueToSize = true;
       }
     });
   }
@@ -283,7 +301,49 @@ class _AddBloodContactBottomSheetState
       await _saveNativeContact(contact);
     }
 
-    if (mounted) Navigator.pop(context, contact);
+    if (!mounted) return;
+    if (_removedContactPhotoDueToSize) {
+      _showSnack('Contact saved without photo.');
+    }
+    Navigator.pop(context, contact);
+  }
+
+  Future<Uint8List?> _compressPhotoToLimit(Uint8List input) async {
+    if (input.isEmpty) return null;
+    if (input.length <= _maxPhotoBytes) return input;
+
+    final widths = [1600, 1400, 1200, 1000, 900, 800, 700, 600, 512, 420];
+    final qualities = [92, 86, 80, 74, 68, 60, 52, 44, 36, 28, 20, 14];
+    Uint8List? best;
+
+    for (final width in widths) {
+      for (final quality in qualities) {
+        try {
+          final compressed = await FlutterImageCompress.compressWithList(
+            input,
+            minWidth: width,
+            minHeight: width,
+            quality: quality,
+            format: CompressFormat.jpeg,
+            keepExif: false,
+          );
+          if (compressed.isEmpty) continue;
+          if (best == null || compressed.length < best.length) {
+            best = compressed;
+          }
+          if (compressed.length <= _maxPhotoBytes) {
+            return compressed;
+          }
+        } catch (_) {
+          // Try next compression settings.
+        }
+      }
+    }
+
+    if (best != null && best.length <= _maxPhotoBytes) {
+      return best;
+    }
+    return null;
   }
 
   Future<void> _saveNativeContact(BloodContact contact) async {
@@ -341,26 +401,23 @@ class _AddBloodContactBottomSheetState
 
   Future<_ExistingNameChoice?> _askNameChoice(String existingName) {
     final inputName = _nameController.text.trim();
-    return showDialog<_ExistingNameChoice>(
+    return showAppOptionsDialog<_ExistingNameChoice>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Contact already exists'),
-        content: Text(
+      title: 'Contact already exists',
+      message:
           'This phone number already exists in your phone contacts as "$existingName". Do you want to use that name or keep "$inputName" for the blood contact?',
+      options: const [
+        AppDialogOption(
+          value: _ExistingNameChoice.keepInput,
+          label: 'Keep inputted name',
         ),
-        actions: [
-          TextButton(
-            onPressed: () =>
-                Navigator.pop(context, _ExistingNameChoice.keepInput),
-            child: const Text('Keep inputted name'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(context, _ExistingNameChoice.useExisting),
-            child: const Text('Use phone contact name'),
-          ),
-        ],
-      ),
+        AppDialogOption(
+          value: _ExistingNameChoice.useExisting,
+          label: 'Use phone contact name',
+          filled: true,
+          destructive: false,
+        ),
+      ],
     );
   }
 
@@ -369,24 +426,14 @@ class _AddBloodContactBottomSheetState
         ? 'this contact'
         : '"${existingName.trim()}"';
 
-    return showDialog<bool>(
+    return showAppConfirmationDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Already in phone contacts'),
-        content: Text(
+      title: 'Already in phone contacts',
+      message:
           'This contact already exists in your phone contacts as $displayName. Do you want to add a new phone contact anyway?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('No, only save blood contact'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Add new'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Add new',
+      cancelLabel: 'No, only save blood contact',
+      destructive: false,
     );
   }
 
@@ -396,209 +443,269 @@ class _AddBloodContactBottomSheetState
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  bool _hasUnsavedChanges() {
+    final existing = widget.contact;
+    if (existing == null) {
+      return _nameController.text.trim().isNotEmpty ||
+          _phoneController.text.trim().isNotEmpty ||
+          _emailController.text.trim().isNotEmpty ||
+          _noteController.text.trim().isNotEmpty ||
+          _bloodGroup != null ||
+          _availability != DonorAvailability.available ||
+          _lastDonationDate != null ||
+          _photoBytes != null ||
+          _photoPath != null ||
+          _saveToPhoneContacts ||
+          !_manualMode;
+    }
+
+    final currentPhotoBase64 = _photoBytes == null
+        ? null
+        : base64Encode(_photoBytes!);
+    return _nameController.text.trim() != existing.name ||
+        normalizedPhoneNumber(_phoneController.text.trim()) !=
+            normalizedPhoneNumber(existing.phone) ||
+        _emailController.text.trim() != existing.email.trim() ||
+        _noteController.text.trim() != existing.note.trim() ||
+        _bloodGroup != existing.bloodGroup ||
+        _availability != existing.availability ||
+        _lastDonationDate != existing.lastDonationDate ||
+        _photoPath != existing.photoPath ||
+        currentPhotoBase64 != existing.photoBase64 ||
+        _saveToPhoneContacts != existing.saveToPhoneContacts;
+  }
+
+  Future<void> _attemptClose() async {
+    if (!_hasUnsavedChanges()) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+
+    final shouldDiscard = await showAppConfirmationDialog(
+      context: context,
+      title: 'Discard changes?',
+      message: 'You have unsaved changes in this form.',
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep editing',
+    );
+
+    if (shouldDiscard == true && mounted) {
+      Navigator.pop(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.viewInsetsOf(context).bottom;
 
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-      child: Material(
-        color: Colors.white,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(18, 10, 18, bottomPadding + 18),
-          child: Form(
-            key: _formKey,
-            autovalidateMode: _submitted
-                ? AutovalidateMode.onUserInteraction
-                : AutovalidateMode.disabled,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 54,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: const Color(0xffc9c4c4),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.contact == null
-                                ? 'Add Blood Contact'
-                                : 'Edit Blood Contact',
-                            style: Theme.of(
-                              context,
-                            ).textTheme.titleLarge?.copyWith(fontSize: 28),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            _isEditing
-                                ? 'Update saved donor details'
-                                : 'Add a new donor to your list',
-                            style: const TextStyle(
-                              color: Color(0xff565660),
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _attemptClose();
+      },
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        child: Material(
+          color: Colors.white,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(18, 10, 18, bottomPadding + 18),
+            child: Form(
+              key: _formKey,
+              autovalidateMode: _submitted
+                  ? AutovalidateMode.onUserInteraction
+                  : AutovalidateMode.disabled,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 54,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: const Color(0xffc9c4c4),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Close',
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close, size: 28),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                if (!_isEditing) ...[
-                  AddContactSegmentedControl(
-                    manualMode: _manualMode,
-                    onManual: () => setState(() => _manualMode = true),
-                    onContacts: () async {
-                      setState(() => _manualMode = false);
-                      await _selectPhoneContact();
-                    },
                   ),
-                  const SizedBox(height: 22),
-                ],
-                if (!_isEditing && !_manualMode)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: OutlinedButton.icon(
-                      onPressed: _selectPhoneContact,
-                      icon: const Icon(Icons.contacts_outlined),
-                      label: const Text('Choose phone contact'),
-                    ),
-                  ),
-                AppTextField(
-                  controller: _nameController,
-                  label: 'Name *',
-                  hint: 'Enter full name',
-                  icon: Icons.person_outline,
-                  validator: _requiredValidator('Name required'),
-                ),
-                const SizedBox(height: 12),
-                AppTextField(
-                  controller: _phoneController,
-                  label: 'Phone number *',
-                  hint: 'Enter phone number',
-                  icon: Icons.phone,
-                  errorText: _phoneDuplicateError,
-                  keyboardType: TextInputType.phone,
-                  validator: (value) {
-                    return _requiredValidator('Phone number required')(value);
-                  },
-                ),
-                const SizedBox(height: 12),
-                AppDropdown<String>(
-                  label: 'Blood Group *',
-                  hint: 'Select blood group',
-                  icon: Icons.water_drop,
-                  value: _bloodGroup,
-                  items: bloodGroups,
-                  labelBuilder: (value) => value,
-                  onChanged: (value) => setState(() => _bloodGroup = value),
-                  validator: (value) =>
-                      value == null ? 'Blood group required' : null,
-                ),
-                const SizedBox(height: 12),
-                AppDropdown<DonorAvailability>(
-                  label: 'Availability *',
-                  hint: 'Select availability',
-                  icon: Icons.circle,
-                  value: _availability,
-                  items: DonorAvailability.values,
-                  labelBuilder: (value) => value.label,
-                  onChanged: (value) => setState(() => _availability = value),
-                  validator: (value) =>
-                      value == null ? 'Availability required' : null,
-                ),
-                const SizedBox(height: 12),
-                DatePickerField(
-                  value: _lastDonationDate,
-                  onTap: _pickLastDonationDate,
-                ),
-                const SizedBox(height: 12),
-                AppTextField(
-                  controller: _emailController,
-                  label: 'Email (optional)',
-                  hint: 'Enter email address',
-                  icon: Icons.mail_outline,
-                  keyboardType: TextInputType.emailAddress,
-                ),
-                const SizedBox(height: 12),
-                AppTextField(
-                  controller: _noteController,
-                  label: 'Note (optional)',
-                  hint: 'Add any note...',
-                  icon: Icons.note_alt_outlined,
-                  minLines: 2,
-                  maxLines: 3,
-                ),
-                const SizedBox(height: 12),
-                ProfilePhotoField(
-                  photoBytes: _photoBytes,
-                  photoName: _photoName,
-                  errorText: _photoError,
-                  onPick: _pickImage,
-                  onRemove: _removeImage,
-                ),
-                const SizedBox(height: 16),
-                if (!_isEditing) ...[
+                  const SizedBox(height: 18),
                   Row(
                     children: [
-                      Checkbox(
-                        value: _saveToPhoneContacts,
-                        onChanged: (value) {
-                          setState(() => _saveToPhoneContacts = value ?? false);
-                        },
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.contact == null
+                                  ? 'Add Blood Contact'
+                                  : 'Edit Blood Contact',
+                              style: Theme.of(
+                                context,
+                              ).textTheme.titleLarge?.copyWith(fontSize: 28),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              _isEditing
+                                  ? 'Update saved donor details'
+                                  : 'Add a new donor to your list',
+                              style: const TextStyle(
+                                color: Color(0xff565660),
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      const Expanded(
-                        child: Text('Also save to my phone contacts'),
-                      ),
-                      const Icon(
-                        Icons.info_outline,
-                        size: 19,
-                        color: Color(0xff76727a),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: _attemptClose,
+                        icon: const Icon(Icons.close, size: 28),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 18),
-                ],
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xffd90416),
-                      disabledBackgroundColor: const Color(0xffffc9ce),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                  const SizedBox(height: 24),
+                  if (!_isEditing) ...[
+                    AddContactSegmentedControl(
+                      manualMode: _manualMode,
+                      onManual: () => setState(() => _manualMode = true),
+                      onContacts: () async {
+                        setState(() => _manualMode = false);
+                        await _selectPhoneContact();
+                      },
+                    ),
+                    const SizedBox(height: 22),
+                  ],
+                  if (!_isEditing && !_manualMode)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: OutlinedButton.icon(
+                        onPressed: _selectPhoneContact,
+                        icon: const Icon(Icons.contacts_outlined),
+                        label: const Text('Choose phone contact'),
                       ),
                     ),
-                    onPressed: _canSave ? _submit : null,
-                    child: const Text(
-                      'Save Contact',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
+                  AppTextField(
+                    controller: _nameController,
+                    label: 'Name *',
+                    hint: 'Enter full name',
+                    icon: Icons.person_outline,
+                    validator: _requiredValidator('Name required'),
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _phoneController,
+                    label: 'Phone number *',
+                    hint: 'Enter phone number',
+                    icon: Icons.phone,
+                    errorText: _phoneDuplicateError,
+                    keyboardType: TextInputType.phone,
+                    validator: (value) {
+                      return _requiredValidator('Phone number required')(value);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  AppDropdown<String>(
+                    label: 'Blood Group *',
+                    hint: 'Select blood group',
+                    icon: Icons.water_drop,
+                    value: _bloodGroup,
+                    items: bloodGroups,
+                    labelBuilder: (value) => value,
+                    onChanged: (value) => setState(() => _bloodGroup = value),
+                    validator: (value) =>
+                        value == null ? 'Blood group required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  AppDropdown<DonorAvailability>(
+                    label: 'Availability *',
+                    hint: 'Select availability',
+                    icon: Icons.circle,
+                    value: _availability,
+                    items: DonorAvailability.values,
+                    labelBuilder: (value) => value.label,
+                    onChanged: (value) => setState(() => _availability = value),
+                    validator: (value) =>
+                        value == null ? 'Availability required' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  DatePickerField(
+                    value: _lastDonationDate,
+                    onTap: _pickLastDonationDate,
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _emailController,
+                    label: 'Email (optional)',
+                    hint: 'Enter email address',
+                    icon: Icons.mail_outline,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _noteController,
+                    label: 'Note (optional)',
+                    hint: 'Add any note...',
+                    icon: Icons.note_alt_outlined,
+                    minLines: 2,
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 12),
+                  ProfilePhotoField(
+                    photoBytes: _photoBytes,
+                    photoName: _photoName,
+                    errorText: _photoError,
+                    onPick: _pickImage,
+                    onRemove: _removeImage,
+                  ),
+                  const SizedBox(height: 16),
+                  if (!_isEditing) ...[
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: _saveToPhoneContacts,
+                          onChanged: (value) {
+                            setState(
+                              () => _saveToPhoneContacts = value ?? false,
+                            );
+                          },
+                        ),
+                        const Expanded(
+                          child: Text('Also save to my phone contacts'),
+                        ),
+                        const Icon(
+                          Icons.info_outline,
+                          size: 19,
+                          color: Color(0xff76727a),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                  ],
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xffd90416),
+                        disabledBackgroundColor: const Color(0xffffc9ce),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: _canSave ? _submit : null,
+                      child: const Text(
+                        'Save Contact',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

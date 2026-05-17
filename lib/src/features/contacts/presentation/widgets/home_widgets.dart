@@ -151,7 +151,7 @@ class HomeHeroHeader extends StatelessWidget {
                       'Good evening',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Colors.white,
                         fontSize: 24,
                         height: 1.1,
@@ -316,7 +316,7 @@ class _NeedCardCopy extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Need blood urgently?',
+          'Someone needs blood urgently?',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
@@ -328,7 +328,7 @@ class _NeedCardCopy extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Create a new blood need and let your network know.',
+          'Create a need so you can follow up with donors quickly.',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(color: Color(0xff555560), fontSize: 14, height: 1.3),
@@ -375,11 +375,13 @@ class SectionHeader extends StatelessWidget {
     required this.title,
     this.actionLabel,
     this.onAction,
+    this.compact = false,
   });
 
   final String title;
   final String? actionLabel;
   final VoidCallback? onAction;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -388,12 +390,23 @@ class SectionHeader extends StatelessWidget {
         Expanded(
           child: Text(
             title,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              height: compact ? 1 : null,
+            ),
           ),
         ),
         if (actionLabel != null)
           TextButton(
             onPressed: onAction,
+            style: TextButton.styleFrom(
+              padding: compact ? EdgeInsets.zero : null,
+              minimumSize: compact ? Size.zero : null,
+              tapTargetSize: compact
+                  ? MaterialTapTargetSize.shrinkWrap
+                  : null,
+            ),
             child: Text(
               actionLabel!,
               style: const TextStyle(
@@ -443,7 +456,6 @@ class OverviewStatsGrid extends StatelessWidget {
               icon: Icons.groups_2_outlined,
               value: stats.total,
               title: 'Total Donors',
-              subtitle: 'In your network',
               color: const Color(0xffdf3348),
               background: const Color(0xfffff8f8),
               onTap: onTotalDonors,
@@ -452,7 +464,6 @@ class OverviewStatsGrid extends StatelessWidget {
               icon: Icons.check_circle_outline,
               value: stats.available,
               title: 'Available Now',
-              subtitle: 'Can donate now',
               color: const Color(0xff129c4b),
               background: const Color(0xfff5fffa),
               onTap: onAvailable,
@@ -461,7 +472,6 @@ class OverviewStatsGrid extends StatelessWidget {
               icon: Icons.assignment_outlined,
               value: openNeedsCount,
               title: 'Open Needs',
-              subtitle: 'Require help',
               color: const Color(0xffff9718),
               background: const Color(0xfffffbf4),
               onTap: onOpenNeeds,
@@ -470,7 +480,6 @@ class OverviewStatsGrid extends StatelessWidget {
               icon: Icons.volunteer_activism_outlined,
               value: completedNeedsCount,
               title: 'Completed Helps',
-              subtitle: 'Successfully fulfilled',
               color: const Color(0xff7754c7),
               background: const Color(0xfffbf8ff),
               onTap: onCompletedHelps,
@@ -488,7 +497,6 @@ class OverviewStatCard extends StatelessWidget {
     required this.icon,
     required this.value,
     required this.title,
-    required this.subtitle,
     required this.color,
     required this.background,
     required this.onTap,
@@ -497,7 +505,6 @@ class OverviewStatCard extends StatelessWidget {
   final IconData icon;
   final int value;
   final String title;
-  final String subtitle;
   final Color color;
   final Color background;
   final VoidCallback onTap;
@@ -549,18 +556,6 @@ class OverviewStatCard extends StatelessWidget {
                   fontSize: 9.5,
                   height: 1.1,
                   fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                subtitle,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xff62616b),
-                  fontSize: 9,
-                  height: 1.15,
                 ),
               ),
             ],
@@ -629,6 +624,11 @@ class BloodGroupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final groupColor = bloodGroupColors[group] ?? const Color(0xffe5161d);
+    final cardColor = selected
+        ? groupColor.withValues(alpha: 0.12)
+        : Colors.white;
+    final countColor = selected ? groupColor : const Color(0xff1f2330);
+    final groupTextColor = selected ? groupColor : const Color(0xff4f5565);
 
     return Material(
       color: Colors.transparent,
@@ -638,7 +638,7 @@ class BloodGroupCard extends StatelessWidget {
         child: Ink(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: cardColor,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: selected ? groupColor : const Color(0xfff0ece8),
@@ -654,28 +654,31 @@ class BloodGroupCard extends StatelessWidget {
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Icon(Icons.water_drop, color: groupColor, size: 18),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Text(
                 group,
+                textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: groupColor,
-                  fontSize: 17,
+                  color: groupTextColor,
+                  fontSize: 14,
                   height: 1,
                   fontWeight: FontWeight.w900,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                '$count donors',
+                '$count',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xff60616a),
-                  fontSize: 9.5,
-                  height: 1.1,
-                  fontWeight: FontWeight.w600,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: countColor,
+                  fontSize: 20,
+                  height: 1,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],
@@ -691,10 +694,12 @@ class QuickActionsScroller extends StatelessWidget {
     super.key,
     required this.onAdd,
     required this.onNeed,
+    required this.onFindDonors,
   });
 
   final VoidCallback onAdd;
   final VoidCallback onNeed;
+  final VoidCallback onFindDonors;
 
   @override
   Widget build(BuildContext context) {
@@ -720,9 +725,9 @@ class QuickActionsScroller extends StatelessWidget {
           const SizedBox(width: 12),
           QuickActionCard(
             icon: Icons.groups_2_outlined,
-            title: 'Find Donors',
-            subtitle: 'Browse donors by group and status',
-            onTap: onNeed,
+            title: 'See All Donors',
+            subtitle: 'Open contacts and browse every donor',
+            onTap: onFindDonors,
           ),
         ],
       ),
@@ -865,8 +870,9 @@ class RecentNeedsList extends StatelessWidget {
             title: '${needs[i].bloodGroup} Blood Needed',
             location: needs[i].hospital,
             date: 'Needed by ${needs[i].date}',
-            status: needs[i].urgency.label,
-            statusColor: needs[i].urgency.color,
+            requestStatus: needs[i].status.label,
+            requestStatusColor: needs[i].status.color,
+            requestStatusTint: needs[i].status.tint,
             tint: needs[i].status.tint,
             onTap: () => onTapNeed(needs[i]),
           ),
@@ -884,8 +890,9 @@ class RecentNeedTile extends StatelessWidget {
     required this.title,
     required this.location,
     required this.date,
-    required this.status,
-    required this.statusColor,
+    required this.requestStatus,
+    required this.requestStatusColor,
+    required this.requestStatusTint,
     required this.tint,
     required this.onTap,
   });
@@ -894,8 +901,9 @@ class RecentNeedTile extends StatelessWidget {
   final String title;
   final String location;
   final String date;
-  final String status;
-  final Color statusColor;
+  final String requestStatus;
+  final Color requestStatusColor;
+  final Color requestStatusTint;
   final Color tint;
   final VoidCallback onTap;
 
@@ -926,7 +934,11 @@ class RecentNeedTile extends StatelessWidget {
                 width: 54,
                 height: 54,
                 decoration: BoxDecoration(color: tint, shape: BoxShape.circle),
-                child: Icon(Icons.water_drop, color: statusColor, size: 30),
+                child: Icon(
+                  Icons.water_drop,
+                  color: requestStatusColor,
+                  size: 30,
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -958,18 +970,18 @@ class RecentNeedTile extends StatelessWidget {
               const SizedBox(width: 10),
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: 10,
+                  vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.1),
+                  color: requestStatusTint,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  status,
+                  requestStatus,
                   style: TextStyle(
-                    color: statusColor,
-                    fontSize: 12,
+                    color: requestStatusColor,
+                    fontSize: 11,
                     fontWeight: FontWeight.w900,
                   ),
                 ),

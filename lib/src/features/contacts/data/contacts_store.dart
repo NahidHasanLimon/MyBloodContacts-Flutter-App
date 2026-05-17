@@ -24,8 +24,12 @@ class ContactsStore {
   static const _driveEmailKey = 'blood_contacts.drive_email';
   static const _syncHistoryKey = 'blood_contacts.sync_history';
   static const _lastSyncStatusKey = 'blood_contacts.last_sync_status';
+  static const _autoSyncEnabledKey = 'blood_contacts.auto_sync_enabled';
+  static const _lastAutoSyncAttemptAtKey =
+      'blood_contacts.last_auto_sync_attempt_at';
   static const _notifySyncFailedKey = 'blood_contacts.notify_sync_failed';
   static const _notifySyncStaleKey = 'blood_contacts.notify_sync_stale';
+  static const _notifySyncEventsKey = 'blood_contacts.notify_sync_events';
   static const _onboardingCompletedKey = 'blood_contacts.onboarding_completed';
 
   final SharedPreferences _prefs;
@@ -233,18 +237,50 @@ class ContactsStore {
     return _prefs.setString(_lastSyncStatusKey, status);
   }
 
-  List<DateTime> loadSyncHistory() {
+  List<SyncHistoryEntry> loadSyncHistory() {
     final values = _prefs.getStringList(_syncHistoryKey) ?? const [];
-    return values.map(DateTime.tryParse).whereType<DateTime>().toList()
-      ..sort((a, b) => b.compareTo(a));
+    final entries =
+        values
+            .map(SyncHistoryEntry.tryParse)
+            .whereType<SyncHistoryEntry>()
+            .toList()
+          ..sort((a, b) => b.at.compareTo(a.at));
+    return entries;
   }
 
-  Future<void> addSyncHistory(DateTime syncedAt) async {
+  Future<void> addSyncHistory(
+    DateTime syncedAt, {
+    required String status,
+    int? contactCount,
+    int? needCount,
+    String? message,
+  }) async {
     final nextHistory = [
-      syncedAt.toIso8601String(),
-      ...loadSyncHistory().map((date) => date.toIso8601String()),
+      SyncHistoryEntry(
+        at: syncedAt,
+        status: status,
+        contactCount: contactCount,
+        needCount: needCount,
+        message: message,
+      ).serialize(),
+      ...loadSyncHistory().map((entry) => entry.serialize()),
     ];
     await _prefs.setStringList(_syncHistoryKey, nextHistory);
+  }
+
+  bool loadAutoSyncEnabled() => _prefs.getBool(_autoSyncEnabledKey) ?? false;
+
+  Future<void> saveAutoSyncEnabled(bool enabled) {
+    return _prefs.setBool(_autoSyncEnabledKey, enabled);
+  }
+
+  DateTime? loadLastAutoSyncAttemptAt() {
+    final raw = _prefs.getString(_lastAutoSyncAttemptAtKey);
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  Future<void> saveLastAutoSyncAttemptAt(DateTime at) {
+    return _prefs.setString(_lastAutoSyncAttemptAtKey, at.toIso8601String());
   }
 
   bool loadNotifySyncFailedEnabled() =>
@@ -259,6 +295,13 @@ class ContactsStore {
 
   Future<void> saveNotifySyncStaleEnabled(bool enabled) {
     return _prefs.setBool(_notifySyncStaleKey, enabled);
+  }
+
+  bool loadNotifySyncEventsEnabled() =>
+      _prefs.getBool(_notifySyncEventsKey) ?? true;
+
+  Future<void> saveNotifySyncEventsEnabled(bool enabled) {
+    return _prefs.setBool(_notifySyncEventsKey, enabled);
   }
 
   bool loadOnboardingCompleted() =>
@@ -494,6 +537,56 @@ CREATE TABLE IF NOT EXISTS $_notificationsTable (
       throw StateError('ContactsStore.init must be called before use.');
     }
     return database;
+  }
+}
+
+class SyncHistoryEntry {
+  const SyncHistoryEntry({
+    required this.at,
+    required this.status,
+    this.contactCount,
+    this.needCount,
+    this.message,
+  });
+
+  final DateTime at;
+  final String status;
+  final int? contactCount;
+  final int? needCount;
+  final String? message;
+
+  String serialize() {
+    final contacts = contactCount?.toString() ?? '';
+    final needs = needCount?.toString() ?? '';
+    final note = message == null || message!.trim().isEmpty
+        ? ''
+        : Uri.encodeComponent(message!.trim());
+    return '${at.toIso8601String()}|$status|$contacts|$needs|$note';
+  }
+
+  static SyncHistoryEntry? tryParse(String raw) {
+    if (raw.trim().isEmpty) return null;
+    final parts = raw.split('|');
+    if (parts.length >= 2) {
+      final date = DateTime.tryParse(parts[0]);
+      if (date == null) return null;
+      final contactCount = parts.length >= 3 ? int.tryParse(parts[2]) : null;
+      final needCount = parts.length >= 4 ? int.tryParse(parts[3]) : null;
+      final message = parts.length >= 5 && parts[4].trim().isNotEmpty
+          ? Uri.decodeComponent(parts[4])
+          : null;
+      return SyncHistoryEntry(
+        at: date,
+        status: parts[1],
+        contactCount: contactCount,
+        needCount: needCount,
+        message: message,
+      );
+    }
+
+    final legacyDate = DateTime.tryParse(raw);
+    if (legacyDate == null) return null;
+    return SyncHistoryEntry(at: legacyDate, status: 'success');
   }
 }
 

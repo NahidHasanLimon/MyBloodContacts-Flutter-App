@@ -25,9 +25,10 @@ class _NewNeedPageState extends State<NewNeedPage> {
   String? _bloodGroup = 'O+';
   int _unitsNeeded = 1;
   bool _urgent = true;
+  NeedStatus _status = NeedStatus.open;
   DateTime _needDate = DateTime.now();
   TimeOfDay? _needTime;
-  bool _requestedBySameAsContactPerson = true;
+  bool _contactPersonSameAsRequestedBy = true;
   bool _submitted = false;
   bool get _isEditing => widget.initialNeed != null;
 
@@ -40,11 +41,17 @@ class _NewNeedPageState extends State<NewNeedPage> {
     _bloodGroup = need.bloodGroup.isEmpty ? 'O+' : need.bloodGroup;
     _unitsNeeded = need.units;
     _urgent = need.urgency == NeedUrgency.urgent;
+    _status = need.status;
     _needDate = _parseNeedDate(need.date) ?? DateTime.now();
     _needTime = _parseNeedTime(need.time);
     _locationController.text = need.hospital;
-    _contactNameController.text = need.requester;
-    _contactPhoneController.text = need.phone;
+    _requestedByNameController.text = need.requester;
+    _requestedByPhoneController.text = need.phone;
+    _contactNameController.text = need.contactPersonName;
+    _contactPhoneController.text = need.contactPersonPhone;
+    _contactPersonSameAsRequestedBy =
+        need.contactPersonName.trim() == need.requester.trim() &&
+        need.contactPersonPhone.trim() == need.phone.trim();
     _patientNameController.text = need.patientName;
     _notesController.text = need.summary;
   }
@@ -119,14 +126,16 @@ class _NewNeedPageState extends State<NewNeedPage> {
     setState(() => _submitted = true);
     if (!_formKey.currentState!.validate()) return;
 
-    final requesterName = _requestedBySameAsContactPerson
-        ? _contactNameController.text.trim()
-        : _requestedByNameController.text.trim();
-    final requesterPhone = _requestedBySameAsContactPerson
-        ? _contactPhoneController.text.trim()
-        : _requestedByPhoneController.text.trim();
+    final requesterName = _requestedByNameController.text.trim();
+    final requesterPhone = _requestedByPhoneController.text.trim();
+    final contactName = _contactPersonSameAsRequestedBy
+        ? requesterName
+        : _contactNameController.text.trim();
+    final contactPhone = _contactPersonSameAsRequestedBy
+        ? requesterPhone
+        : _contactPhoneController.text.trim();
     final patientName = _patientNameController.text.trim().isEmpty
-        ? _contactNameController.text.trim()
+        ? contactName
         : _patientNameController.text.trim();
     final notes = _notesController.text.trim();
     final now = DateTime.now();
@@ -140,8 +149,11 @@ class _NewNeedPageState extends State<NewNeedPage> {
             time: _needTime == null ? 'Any time' : _needTime!.format(context),
             requester: requesterName,
             phone: requesterPhone,
+            contactPersonName: contactName,
+            contactPersonPhone: contactPhone,
             units: _unitsNeeded,
             urgency: _urgent ? NeedUrgency.urgent : NeedUrgency.normal,
+            status: _status,
             updatedAt: now,
           )
         : BloodNeedRequest(
@@ -154,6 +166,8 @@ class _NewNeedPageState extends State<NewNeedPage> {
             time: _needTime == null ? 'Any time' : _needTime!.format(context),
             requester: requesterName,
             phone: requesterPhone,
+            contactPersonName: contactName,
+            contactPersonPhone: contactPhone,
             units: _unitsNeeded,
             urgency: _urgent ? NeedUrgency.urgent : NeedUrgency.normal,
             status: NeedStatus.open,
@@ -203,34 +217,30 @@ class _NewNeedPageState extends State<NewNeedPage> {
                 builder: (context, constraints) {
                   final compact = constraints.maxWidth < 620;
                   final fields = [
-                    _FieldCard(
-                      child: _NeedDropdown<String>(
-                        label: 'Blood Group *',
-                        value: _bloodGroup,
-                        icon: Icons.water_drop_outlined,
-                        items: bloodGroups,
-                        labelBuilder: (value) => value,
-                        validator: (value) =>
-                            value == null ? 'Blood group required' : null,
-                        onChanged: (value) => setState(() {
-                          _bloodGroup = value;
-                        }),
-                      ),
+                    _NeedDropdown<String>(
+                      label: 'Blood Group *',
+                      value: _bloodGroup,
+                      icon: Icons.water_drop_outlined,
+                      items: bloodGroups,
+                      labelBuilder: (value) => value,
+                      validator: (value) =>
+                          value == null ? 'Blood group required' : null,
+                      onChanged: (value) => setState(() {
+                        _bloodGroup = value;
+                      }),
                     ),
-                    _FieldCard(
-                      child: _NeedDropdown<int>(
-                        label: 'Units Needed *',
-                        value: _unitsNeeded,
-                        icon: Icons.local_drink_outlined,
-                        items: List.generate(10, (index) => index + 1),
-                        labelBuilder: (value) =>
-                            '$value Unit${value == 1 ? '' : 's'}',
-                        validator: (value) =>
-                            value == null ? 'Units required' : null,
-                        onChanged: (value) => setState(() {
-                          _unitsNeeded = value ?? _unitsNeeded;
-                        }),
-                      ),
+                    _NeedDropdown<int>(
+                      label: 'Units Needed *',
+                      value: _unitsNeeded,
+                      icon: Icons.local_drink_outlined,
+                      items: List.generate(10, (index) => index + 1),
+                      labelBuilder: (value) =>
+                          '$value Unit${value == 1 ? '' : 's'}',
+                      validator: (value) =>
+                          value == null ? 'Units required' : null,
+                      onChanged: (value) => setState(() {
+                        _unitsNeeded = value ?? _unitsNeeded;
+                      }),
                     ),
                     _UrgencyCard(
                       urgent: _urgent,
@@ -270,12 +280,10 @@ class _NewNeedPageState extends State<NewNeedPage> {
                 date: _needDate,
                 time: _needTime,
                 onDate: _pickNeedDate,
-                onClearDate: () => setState(() => _needDate = DateTime.now()),
                 onTime: _pickNeedTime,
+                onClearTime: () => setState(() => _needTime = null),
               ),
-              const SizedBox(height: 22),
-              const _SectionTitle('LOCATION'),
-              const SizedBox(height: 10),
+              const SizedBox(height: 16),
               _NeedTextField(
                 controller: _locationController,
                 label: 'Location / Hospital *',
@@ -283,81 +291,115 @@ class _NewNeedPageState extends State<NewNeedPage> {
                 icon: Icons.location_on_outlined,
                 validator: _requiredValidator('Location or hospital required'),
               ),
+              if (_isEditing) ...[
+                const SizedBox(height: 10),
+                _NeedDropdown<NeedStatus>(
+                  label: 'Need Status *',
+                  value: _status,
+                  icon: Icons.flag_outlined,
+                  items: NeedStatus.values,
+                  labelBuilder: (value) => value.label,
+                  validator: (value) =>
+                      value == null ? 'Need status required' : null,
+                  onChanged: (value) => setState(() {
+                    _status = value ?? _status;
+                  }),
+                ),
+              ],
               const SizedBox(height: 22),
               _SectionHeaderAction(
-                title: 'CONTACT PERSON',
+                title: 'REQUESTED BY',
                 actionLabel: 'Choose from contacts',
                 onAction: () => _selectPhoneContact(
-                  nameController: _contactNameController,
-                  phoneController: _contactPhoneController,
+                  nameController: _requestedByNameController,
+                  phoneController: _requestedByPhoneController,
                 ),
               ),
               const SizedBox(height: 10),
               _ResponsivePair(
                 first: _NeedTextField(
-                  controller: _contactNameController,
-                  label: 'Contact Person Name *',
+                  controller: _requestedByNameController,
+                  label: 'Requested By Name *',
                   hint: 'Enter name',
                   icon: Icons.person_outline,
-                  validator: _requiredValidator('Contact person name required'),
+                  validator: _requiredValidator('Requester name required'),
                 ),
                 second: _NeedTextField(
-                  controller: _contactPhoneController,
-                  label: 'Contact Person Phone *',
+                  controller: _requestedByPhoneController,
+                  label: 'Requested By Phone *',
                   hint: 'Enter phone number',
                   icon: Icons.phone_outlined,
                   keyboardType: TextInputType.phone,
-                  validator: _requiredValidator(
-                    'Contact person phone required',
-                  ),
+                  validator: _requiredValidator('Requester phone required'),
                 ),
               ),
               const SizedBox(height: 22),
-              const _SectionTitle('REQUESTED BY'),
-              const SizedBox(height: 10),
-              _SameAsContactPersonTile(
-                value: _requestedBySameAsContactPerson,
-                onChanged: (value) {
-                  setState(() {
-                    _requestedBySameAsContactPerson = value;
-                  });
-                },
-              ),
-              if (!_requestedBySameAsContactPerson) ...[
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: () => _selectPhoneContact(
-                      nameController: _requestedByNameController,
-                      phoneController: _requestedByPhoneController,
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Checkbox(
+                          value: _contactPersonSameAsRequestedBy,
+                          visualDensity: VisualDensity.compact,
+                          activeColor: const Color(0xffd90416),
+                          onChanged: (value) {
+                            setState(() {
+                              _contactPersonSameAsRequestedBy = value ?? true;
+                            });
+                          },
+                        ),
+                        const Expanded(
+                          child: Text(
+                            'Contact person same as requested by',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Color(0xff231816),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    icon: const Icon(Icons.contacts_outlined, size: 18),
-                    label: const Text('Choose from contacts'),
                   ),
-                ),
+                  if (!_contactPersonSameAsRequestedBy)
+                    TextButton.icon(
+                      onPressed: () => _selectPhoneContact(
+                        nameController: _contactNameController,
+                        phoneController: _contactPhoneController,
+                      ),
+                      icon: const Icon(Icons.contacts_outlined, size: 18),
+                      label: const Text('Choose from contacts'),
+                    ),
+                ],
+              ),
+              if (!_contactPersonSameAsRequestedBy) ...[
                 const SizedBox(height: 10),
                 _ResponsivePair(
                   first: _NeedTextField(
-                    controller: _requestedByNameController,
-                    label: 'Requested By Name *',
+                    controller: _contactNameController,
+                    label: 'Contact Person Name *',
                     hint: 'Enter name',
                     icon: Icons.person_add_alt_outlined,
-                    validator: _requiredValidator('Requester name required'),
+                    validator: _requiredValidator(
+                      'Contact person name required',
+                    ),
                   ),
                   second: _NeedTextField(
-                    controller: _requestedByPhoneController,
-                    label: 'Requested By Phone *',
+                    controller: _contactPhoneController,
+                    label: 'Contact Person Phone *',
                     hint: 'Enter phone number',
                     icon: Icons.phone_outlined,
                     keyboardType: TextInputType.phone,
-                    validator: _requiredValidator('Requester phone required'),
+                    validator: _requiredValidator(
+                      'Contact person phone required',
+                    ),
                   ),
                 ),
               ],
-              const SizedBox(height: 22),
-              const _SectionTitle('PATIENT / RECIPIENT (OPTIONAL)'),
-              const SizedBox(height: 10),
+              const SizedBox(height: 16),
               _NeedTextField(
                 controller: _patientNameController,
                 label: 'Patient / Recipient Name',
@@ -468,53 +510,6 @@ class _NewNeedPageState extends State<NewNeedPage> {
   }
 }
 
-class _SameAsContactPersonTile extends StatelessWidget {
-  const _SameAsContactPersonTile({
-    required this.value,
-    required this.onChanged,
-  });
-
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => onChanged(!value),
-      borderRadius: BorderRadius.circular(13),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: const Color(0xffe3e4ea)),
-        ),
-        child: Row(
-          children: [
-            Checkbox(
-              value: value,
-              visualDensity: VisualDensity.compact,
-              activeColor: const Color(0xffd90416),
-              onChanged: (nextValue) => onChanged(nextValue ?? true),
-            ),
-            const SizedBox(width: 6),
-            const Expanded(
-              child: Text(
-                'Same as contact person',
-                style: TextStyle(
-                  color: Color(0xff111827),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _PageHeader extends StatelessWidget {
   const _PageHeader({required this.onBack, required this.isEditing});
 
@@ -525,12 +520,12 @@ class _PageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _SquareIconButton(
+        IconButton(
           tooltip: 'Back',
-          icon: Icons.arrow_back,
           onPressed: onBack,
+          icon: const Icon(Icons.arrow_back, color: Colors.black, size: 28),
         ),
-        const SizedBox(width: 18),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -538,13 +533,13 @@ class _PageHeader extends StatelessWidget {
               Text(
                 isEditing ? 'Edit Need' : 'New Need',
                 style: const TextStyle(
-                  color: Color(0xff050505),
+                  color: Colors.black,
                   fontSize: 28,
                   height: 1.05,
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Text(
                 isEditing
                     ? 'Update blood request information.'
@@ -552,54 +547,15 @@ class _PageHeader extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color: Color(0xff44475a),
+                  color: Color(0xff343741),
                   fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(width: 12),
-        _SquareIconButton(
-          tooltip: 'Help',
-          icon: Icons.help_outline,
-          onPressed: () {},
-          circular: true,
-        ),
       ],
-    );
-  }
-}
-
-class _SquareIconButton extends StatelessWidget {
-  const _SquareIconButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-    this.circular = false,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onPressed;
-  final bool circular;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      style: IconButton.styleFrom(
-        fixedSize: const Size(58, 58),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xff111827),
-        side: const BorderSide(color: Color(0xffe9e2e2)),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(circular ? 29 : 14),
-        ),
-      ),
-      icon: Icon(icon, size: 30),
     );
   }
 }
@@ -614,8 +570,8 @@ class _SectionTitle extends StatelessWidget {
     return Text(
       title,
       style: const TextStyle(
-        color: Color(0xff3b3e4f),
-        fontSize: 20,
+        color: Color(0xff231816),
+        fontSize: 16,
         letterSpacing: 0,
         fontWeight: FontWeight.w900,
       ),
@@ -673,17 +629,6 @@ class _ResponsivePair extends StatelessWidget {
         );
       },
     );
-  }
-}
-
-class _FieldCard extends StatelessWidget {
-  const _FieldCard({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return child;
   }
 }
 
@@ -831,43 +776,62 @@ class _NeedByCard extends StatelessWidget {
     required this.date,
     required this.time,
     required this.onDate,
-    required this.onClearDate,
     required this.onTime,
+    required this.onClearTime,
   });
 
   final DateTime date;
   final TimeOfDay? time;
   final VoidCallback onDate;
-  final VoidCallback onClearDate;
   final VoidCallback onTime;
+  final VoidCallback onClearTime;
 
   @override
   Widget build(BuildContext context) {
-    return InputDecorator(
-      decoration: _NeedDecoration.group(label: 'Need By *'),
-      child: _ResponsivePair(
-        first: _PickerTile(
-          label: 'Date *',
-          icon: Icons.calendar_today_outlined,
-          value: _formatDate(date),
-          trailing: IconButton(
-            tooltip: 'Reset date',
-            onPressed: onClearDate,
-            icon: const Icon(Icons.cancel_outlined, size: 24),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _PickerTile(
+            label: 'Date *',
+            icon: Icons.calendar_today_outlined,
+            value: _formatDate(date),
+            trailing: const SizedBox(
+              width: 22,
+              height: 22,
+              child: Icon(Icons.keyboard_arrow_down, size: 20),
+            ),
+            onTap: onDate,
           ),
-          onTap: onDate,
         ),
-        second: _PickerTile(
-          label: 'Time (Optional)',
-          icon: Icons.schedule_outlined,
-          value: time == null
-              ? 'Select time'
-              : MaterialLocalizations.of(context).formatTimeOfDay(time!),
-          muted: time == null,
-          trailing: const Icon(Icons.keyboard_arrow_down, size: 30),
-          onTap: onTime,
+        const SizedBox(width: 4),
+        Expanded(
+          child: _PickerTile(
+            label: 'Time (Optional)',
+            icon: Icons.schedule_outlined,
+            value: time == null
+                ? 'Select time'
+                : MaterialLocalizations.of(context).formatTimeOfDay(time!),
+            muted: time == null,
+            trailing: time == null
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: Icon(Icons.keyboard_arrow_down, size: 20),
+                  )
+                : InkWell(
+                    onTap: onClearTime,
+                    borderRadius: BorderRadius.circular(10),
+                    child: const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: Icon(Icons.cancel_outlined, size: 18),
+                    ),
+                  ),
+            onTap: onTime,
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -1015,31 +979,6 @@ class _NeedDecoration {
       focusedErrorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(13),
         borderSide: const BorderSide(color: Color(0xffd90416), width: 1.3),
-      ),
-    );
-  }
-
-  static InputDecoration group({required String label}) {
-    return InputDecoration(
-      labelText: label,
-      floatingLabelBehavior: FloatingLabelBehavior.always,
-      isDense: true,
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
-      labelStyle: const TextStyle(
-        color: Color(0xff3f4354),
-        fontSize: 12,
-        fontWeight: FontWeight.w700,
-      ),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(13)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
-        borderSide: const BorderSide(color: Color(0xffe3e4ea)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(13),
-        borderSide: const BorderSide(color: Color(0xffe3e4ea)),
       ),
     );
   }

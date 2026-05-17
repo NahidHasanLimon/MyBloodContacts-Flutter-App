@@ -81,22 +81,42 @@ class HomeOverviewPage extends StatelessWidget {
             const SizedBox(height: 0),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: OverviewStatsGrid(
-                stats: stats,
-                openNeedsCount: openNeedsCount,
-                completedNeedsCount: completedNeedsCount,
-                onTotalDonors: onViewAll,
-                onAvailable: onAvailableContacts,
-                onOpenNeeds: onOpenNeeds,
-                onCompletedHelps: onCompletedNeeds,
+              child: Transform.translate(
+                offset: const Offset(0, -4),
+                child: OverviewStatsGrid(
+                  stats: stats,
+                  openNeedsCount: openNeedsCount,
+                  completedNeedsCount: completedNeedsCount,
+                  onTotalDonors: onViewAll,
+                  onAvailable: onAvailableContacts,
+                  onOpenNeeds: onOpenNeeds,
+                  onCompletedHelps: onCompletedNeeds,
+                ),
               ),
             ),
             const SizedBox(height: 28),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 18),
+              child: SectionHeader(
+                title: 'Find Donors by Blood Group',
+                actionLabel: 'See donors',
+                onAction: onViewAll,
+              ),
+            ),
+            const SizedBox(height: 0),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 18),
-              child: SectionHeader(title: 'Find Donors by Blood Group'),
+              child: Text(
+                'Tap a blood group to quickly check donor count.',
+                style: TextStyle(
+                  color: Color(0xff6a6f7d),
+                  fontSize: 12,
+                  height: 1.05,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 0),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
               child: BloodGroupGrid(
@@ -111,7 +131,11 @@ class HomeOverviewPage extends StatelessWidget {
               child: SectionHeader(title: 'Quick Actions'),
             ),
             const SizedBox(height: 6),
-            QuickActionsScroller(onAdd: onAdd, onNeed: onNeed),
+            QuickActionsScroller(
+              onAdd: onAdd,
+              onNeed: onNeed,
+              onFindDonors: onViewAll,
+            ),
             const SizedBox(height: 28),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),

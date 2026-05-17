@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:blood_contacts/src/features/contacts/data/contacts_store.dart';
 import 'package:blood_contacts/src/features/contacts/data/google_drive_sync_service.dart';
+import 'package:blood_contacts/src/features/contacts/data/background_sync_worker.dart';
 import 'package:blood_contacts/src/features/contacts/domain/app_notification.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_need_request.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
@@ -10,11 +13,16 @@ import 'package:blood_contacts/src/features/contacts/presentation/pages/need_det
 import 'package:blood_contacts/src/features/contacts/presentation/pages/new_need_page.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/pages/notification_preferences_page.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/pages/notifications_page.dart';
+import 'package:blood_contacts/src/features/contacts/presentation/widgets/contact_common_widgets.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/widgets/contact_widgets.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/widgets/profile_page.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart' as sqflite;
+import 'package:workmanager/workmanager.dart';
 
 class BloodContactsHome extends StatefulWidget {
   const BloodContactsHome({super.key, this.databaseFactory});
@@ -25,7 +33,8 @@ class BloodContactsHome extends StatefulWidget {
   State<BloodContactsHome> createState() => _BloodContactsHomeState();
 }
 
-class _BloodContactsHomeState extends State<BloodContactsHome> {
+class _BloodContactsHomeState extends State<BloodContactsHome>
+    with WidgetsBindingObserver {
   final _driveSyncService = GoogleDriveSyncService();
 
   ContactsStore? _store;
@@ -41,25 +50,53 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
   String _needsGroupFilter = 'All';
   NeedUrgencyFilter _needsUrgencyFilter = NeedUrgencyFilter.all;
   NeedStatusFilter _needsStatusFilter = NeedStatusFilter.all;
+  String _needsQuery = '';
+  NeedSortOption _needsSortOption = NeedSortOption.newest;
   List<BloodNeedRequest> _needs = [];
   String? _driveFolder;
   String? _driveEmail;
   String? _lastSyncStatus;
-  List<DateTime> _syncHistory = [];
+  List<SyncHistoryEntry> _syncHistory = [];
   bool _autoSyncEnabled = false;
   List<AppNotification> _notifications = [];
   int _notificationCount = 0;
+  bool _notifySyncEvents = true;
   bool _notifySyncFailed = true;
   bool _notifySyncStale = true;
   bool _loading = true;
   bool _syncing = false;
+  bool _syncActionInFlight = false;
   bool _connectingDrive = false;
   bool _showContinueChoice = false;
+  bool _showRestoreProgress = false;
+  bool _restoreReadyToContinue = false;
+  bool _restoreFailed = false;
+  bool _onboardingRestoreInProgress = false;
+  int _restoreSyncedContacts = 0;
+  int _restoreSyncedNeeds = 0;
+  DateTime? _restoreSyncedAt;
+  DateTime? _lastBackPressedAt;
+  Timer? _autoSyncTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoSyncTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _runAutoSyncIfDue();
+    }
   }
 
   Future<void> _load() async {
@@ -75,6 +112,8 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
       await _refreshNotifications(store: store, shouldSetState: false);
       final notifications = await store.loadNotifications();
       final notificationCount = await store.unreadNotificationsCount();
+      final autoSyncEnabled = store.loadAutoSyncEnabled();
+      final notifySyncEvents = store.loadNotifySyncEventsEnabled();
       final notifySyncFailed = store.loadNotifySyncFailedEnabled();
       final notifySyncStale = store.loadNotifySyncStaleEnabled();
 
@@ -95,13 +134,18 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
         _driveEmail = store.loadDriveEmail();
         _lastSyncStatus = store.loadLastSyncStatus();
         _syncHistory = store.loadSyncHistory();
+        _autoSyncEnabled = autoSyncEnabled;
         _notifications = notifications;
         _notificationCount = notificationCount;
+        _notifySyncEvents = notifySyncEvents;
         _notifySyncFailed = notifySyncFailed;
         _notifySyncStale = notifySyncStale;
         _showContinueChoice = !store.loadOnboardingCompleted();
         _loading = false;
       });
+      _scheduleDailyAutoSync();
+      await _syncBackgroundAutoSyncSchedule();
+      _runAutoSyncIfDue();
     } catch (error, stackTrace) {
       debugPrint('Failed to load contacts store: $error');
       debugPrintStack(stackTrace: stackTrace);
@@ -235,24 +279,11 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     BloodContact contact, {
     BuildContext? dialogContext,
   }) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppConfirmationDialog(
       context: dialogContext ?? context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete contact?'),
-        content: const Text(
-          'This blood contact will be removed from your saved donor list.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      title: 'Delete contact?',
+      message: 'This blood contact will be removed from your saved donor list.',
+      confirmLabel: 'Delete',
     );
 
     if (confirmed == true) {
@@ -290,6 +321,15 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     if (_syncing || _connectingDrive) return false;
     final store = _store;
     if (store == null) return false;
+    final hasConnection = await _hasInternetConnection();
+    if (!hasConnection) {
+      if (mounted) {
+        _showOneSnackBar(
+          const Text('No internet connection. Please try again online.'),
+        );
+      }
+      return false;
+    }
 
     setState(() => _connectingDrive = true);
     try {
@@ -315,9 +355,10 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
       return true;
     } catch (error) {
       if (!mounted) return false;
+      final message = _syncUserMessage(_friendlyErrorMessage(error));
       _showDriveSnackBar(
         title: 'Connection failed',
-        message: _friendlyErrorMessage(error),
+        message: message,
         icon: Icons.error_outline,
         color: const Color(0xffd90416),
       );
@@ -347,10 +388,39 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     if (!connected || !mounted) {
       return;
     }
-    await store.saveOnboardingCompleted(true);
+    setState(() {
+      _showContinueChoice = false;
+      _showRestoreProgress = true;
+      _restoreReadyToContinue = false;
+      _restoreFailed = false;
+      _onboardingRestoreInProgress = true;
+      _restoreSyncedContacts = 0;
+      _restoreSyncedNeeds = 0;
+      _restoreSyncedAt = null;
+    });
+    await _syncData(allowInteractiveAuth: true, showFeedback: false);
     if (!mounted) return;
-    setState(() => _showContinueChoice = false);
-    await _syncData(allowInteractiveAuth: true);
+    setState(() {
+      _restoreFailed = _lastSyncStatus != 'success';
+      _restoreReadyToContinue = true;
+    });
+  }
+
+  Future<void> _finishRestoreFlow() async {
+    final store = _store;
+    if (store != null) {
+      await store.saveOnboardingCompleted(true);
+    }
+    if (!mounted) return;
+    setState(() {
+      _showRestoreProgress = false;
+      _restoreReadyToContinue = false;
+      _restoreFailed = false;
+      _onboardingRestoreInProgress = false;
+      _restoreSyncedContacts = 0;
+      _restoreSyncedNeeds = 0;
+      _restoreSyncedAt = null;
+    });
   }
 
   Future<void> _openNewNeed() async {
@@ -392,8 +462,14 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => NotificationPreferencesPage(
+          syncEventsEnabled: _notifySyncEvents,
           syncFailedEnabled: _notifySyncFailed,
           syncStaleEnabled: _notifySyncStale,
+          onSyncEventsChanged: (value) async {
+            await store.saveNotifySyncEventsEnabled(value);
+            if (!mounted) return;
+            setState(() => _notifySyncEvents = value);
+          },
           onSyncFailedChanged: (value) async {
             await store.saveNotifySyncFailedEnabled(value);
             if (!mounted) return;
@@ -521,54 +597,34 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     final folder = _driveFolder?.trim();
     if (folder == null || folder.isEmpty) return;
 
-    final action = await showDialog<_DriveUnlinkAction>(
+    final action = await showAppOptionsDialog<_DriveUnlinkAction>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Unlink Google Drive?'),
-        content: const Text('Choose how you want to disconnect this account.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context, _DriveUnlinkAction.localOnly);
-            },
-            child: const Text('Only unlink'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context, _DriveUnlinkAction.removeCloudBackup);
-            },
-            child: const Text('Unlink and remove data from cloud'),
-          ),
-        ],
-      ),
+      title: 'Unlink Google Drive?',
+      message: 'Choose how you want to disconnect this account.',
+      options: const [
+        AppDialogOption(
+          value: _DriveUnlinkAction.localOnly,
+          label: 'Unlink only',
+        ),
+        AppDialogOption(
+          value: _DriveUnlinkAction.removeCloudBackup,
+          label: 'Unlink and delete backup',
+          destructive: true,
+          filled: true,
+        ),
+      ],
     );
 
     if (action == null) return;
     if (!mounted) return;
 
     if (action == _DriveUnlinkAction.removeCloudBackup) {
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showAppConfirmationDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Are you sure?'),
-          content: const Text(
-            'This will delete the Blood Contacts backup file from Google Drive.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete backup'),
-            ),
-          ],
-        ),
+        title: 'Delete cloud backup?',
+        message:
+            'This will permanently delete your Blood Contacts backup from Google Drive.',
+        confirmLabel: 'Delete backup',
       );
       if (confirmed != true) return;
 
@@ -602,100 +658,195 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
       _driveEmail = null;
       _autoSyncEnabled = false;
     });
+    await _store?.saveAutoSyncEnabled(false);
+    _autoSyncTimer?.cancel();
+    await _syncBackgroundAutoSyncSchedule();
   }
 
-  Future<void> _syncData({bool allowInteractiveAuth = false}) async {
-    if (_syncing) return;
-    final folder = _driveFolder?.trim();
-    if (folder == null || folder.isEmpty) {
+  Future<void> _syncData({
+    bool allowInteractiveAuth = false,
+    bool showFeedback = true,
+  }) async {
+    if (_syncing || _syncActionInFlight) return;
+    _syncActionInFlight = true;
+    try {
+      final hasConnection = await _hasInternetConnection();
+      if (!hasConnection) {
+        final store = _store;
+        if (store != null) {
+          await store.addSyncHistory(
+            DateTime.now(),
+            status: 'failed',
+            message: 'No internet connection.',
+          );
+          await store.saveLastSyncStatus('failed');
+          await _refreshNotifications();
+          if (mounted) {
+            setState(() {
+              _syncHistory = store.loadSyncHistory();
+              _lastSyncStatus = store.loadLastSyncStatus();
+            });
+          }
+        }
+        if (mounted && showFeedback) {
+          _showOneSnackBar(
+            const Text('No internet connection. Please try again online.'),
+          );
+        }
+        return;
+      }
+
+      final folder = _driveFolder?.trim();
+      if (folder == null || folder.isEmpty) {
+        final store = _store;
+        if (store != null) {
+          await store.saveLastSyncStatus('cancelled');
+          await store.addSyncHistory(
+            DateTime.now(),
+            status: 'cancelled',
+            message: 'Google Drive not connected.',
+          );
+          await _refreshNotifications();
+          if (mounted) {
+            setState(() {
+              _syncHistory = store.loadSyncHistory();
+              _lastSyncStatus = store.loadLastSyncStatus();
+            });
+          }
+        }
+        if (!mounted) return;
+        if (showFeedback) {
+          _showOneSnackBar(const Text('Connect Google Drive before syncing.'));
+        }
+        return;
+      }
+
       final store = _store;
-      if (store != null) {
+      if (store == null) return;
+
+      setState(() => _syncing = true);
+      try {
+        final result = await _driveSyncService.sync(
+          store: store,
+          allowInteractiveAuth: allowInteractiveAuth,
+        );
+        final contacts = await store.loadContacts();
+        final needs = await store.loadNeeds();
+        final syncedAt = DateTime.now();
+        await store.addSyncHistory(
+          syncedAt,
+          status: 'success',
+          contactCount: result.contactCount,
+          needCount: result.needCount,
+        );
+        await store.saveLastSyncStatus('success');
+        final accountEmail = result.accountEmail?.trim();
+        if (accountEmail != null && accountEmail.isNotEmpty) {
+          await store.saveDriveEmail(accountEmail);
+        }
+        if (!mounted) return;
+        setState(() {
+          _contacts = contacts;
+          _needs = needs;
+          if (accountEmail != null && accountEmail.isNotEmpty) {
+            _driveEmail = accountEmail;
+          }
+          if (_showRestoreProgress) {
+            _restoreSyncedContacts = result.contactCount;
+            _restoreSyncedNeeds = result.needCount;
+            _restoreSyncedAt = syncedAt;
+          }
+          _syncHistory = store.loadSyncHistory();
+          _lastSyncStatus = store.loadLastSyncStatus();
+        });
+        await _refreshNotifications();
+        if (!mounted) return;
+        if (showFeedback) {
+          _showOneSnackBar(
+            Text(
+              'Synced ${result.contactCount} contacts and ${result.needCount} needs.',
+            ),
+          );
+        }
         await _addSyncEventNotification(
           store: store,
-          status: 'cancelled',
-          title: 'Sync cancelled',
-          message: 'Connect Google Drive before syncing.',
+          status: 'success',
+          title: 'Sync successful',
+          message:
+              'Synced ${result.contactCount} contacts and ${result.needCount} needs.',
         );
         await _refreshNotifications();
-      }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connect Google Drive before syncing.')),
-      );
-      return;
-    }
-
-    final store = _store;
-    if (store == null) return;
-
-    setState(() => _syncing = true);
-    try {
-      final result = await _driveSyncService.sync(
-        store: store,
-        allowInteractiveAuth: allowInteractiveAuth,
-      );
-      final contacts = await store.loadContacts();
-      final needs = await store.loadNeeds();
-      final syncedAt = DateTime.now();
-      await store.addSyncHistory(syncedAt);
-      await store.saveLastSyncStatus('success');
-      final accountEmail = result.accountEmail?.trim();
-      if (accountEmail != null && accountEmail.isNotEmpty) {
-        await store.saveDriveEmail(accountEmail);
-      }
-      if (!mounted) return;
-      setState(() {
-        _contacts = contacts;
-        _needs = needs;
-        if (accountEmail != null && accountEmail.isNotEmpty) {
-          _driveEmail = accountEmail;
+      } catch (error) {
+        final errorMessage = _friendlyErrorMessage(error);
+        final notificationMessage = _syncUserMessage(errorMessage);
+        final lower = errorMessage.toLowerCase();
+        final cancelled =
+            lower.contains('cancel') ||
+            lower.contains('canceled') ||
+            lower.contains('aborted');
+        final terminated =
+            lower.contains('terminate') ||
+            lower.contains('terminated') ||
+            lower.contains('timeout') ||
+            lower.contains('timed out');
+        final status = cancelled
+            ? 'cancelled'
+            : terminated
+            ? 'terminated'
+            : 'failed';
+        await store.addSyncHistory(
+          DateTime.now(),
+          status: status,
+          message: notificationMessage,
+        );
+        await store.saveLastSyncStatus(status);
+        await _addSyncEventNotification(
+          store: store,
+          status: status,
+          title: cancelled
+              ? 'Sync cancelled'
+              : terminated
+              ? 'Sync terminated'
+              : 'Sync failed',
+          message: notificationMessage,
+        );
+        await _refreshNotifications();
+        if (!mounted) return;
+        setState(() {
+          _syncHistory = store.loadSyncHistory();
+          _lastSyncStatus = store.loadLastSyncStatus();
+        });
+        if (showFeedback) {
+          _showDriveSnackBar(
+            title: cancelled
+                ? 'Sync cancelled'
+                : terminated
+                ? 'Sync terminated'
+                : 'Sync failed',
+            message: notificationMessage,
+            icon: cancelled
+                ? Icons.cloud_off_outlined
+                : Icons.cloud_off_outlined,
+            color: cancelled
+                ? const Color(0xfff59e0b)
+                : terminated
+                ? const Color(0xff7d5a50)
+                : const Color(0xffd90416),
+          );
         }
-        _syncHistory = store.loadSyncHistory();
-        _lastSyncStatus = store.loadLastSyncStatus();
-      });
-      await _refreshNotifications();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Synced ${result.contactCount} contacts and ${result.needCount} needs.',
-          ),
-        ),
-      );
-      await _addSyncEventNotification(
-        store: store,
-        status: 'success',
-        title: 'Sync successful',
-        message:
-            'Synced ${result.contactCount} contacts and ${result.needCount} needs.',
-      );
-      await _refreshNotifications();
-    } catch (error) {
-      final errorMessage = _friendlyErrorMessage(error);
-      final lower = errorMessage.toLowerCase();
-      final cancelled =
-          lower.contains('cancel') ||
-          lower.contains('canceled') ||
-          lower.contains('aborted');
-      await store.saveLastSyncStatus(cancelled ? 'cancelled' : 'failed');
-      await _addSyncEventNotification(
-        store: store,
-        status: cancelled ? 'cancelled' : 'failed',
-        title: cancelled ? 'Sync cancelled' : 'Sync failed',
-        message: cancelled ? errorMessage : errorMessage,
-      );
-      await _refreshNotifications();
-      if (!mounted) return;
-      setState(() => _lastSyncStatus = store.loadLastSyncStatus());
-      _showDriveSnackBar(
-        title: cancelled ? 'Sync cancelled' : 'Sync failed',
-        message: errorMessage,
-        icon: cancelled ? Icons.cloud_off_outlined : Icons.cloud_off_outlined,
-        color: cancelled ? const Color(0xfff59e0b) : const Color(0xffd90416),
-      );
+      } finally {
+        if (mounted) setState(() => _syncing = false);
+      }
     } finally {
-      if (mounted) setState(() => _syncing = false);
+      _syncActionInFlight = false;
     }
+  }
+
+  void _showOneSnackBar(Widget content) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: content));
   }
 
   Future<void> _addSyncEventNotification({
@@ -704,6 +855,8 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     required String title,
     required String message,
   }) async {
+    if (_onboardingRestoreInProgress) return;
+    if (!_notifySyncEvents) return;
     final now = DateTime.now();
     await store.upsertNotification(
       code: 'sync_${status}_${now.microsecondsSinceEpoch}',
@@ -711,6 +864,57 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
       message: message,
       createdAt: now,
     );
+  }
+
+  void _scheduleDailyAutoSync() {
+    _autoSyncTimer?.cancel();
+    if (!_autoSyncEnabled) return;
+
+    final now = DateTime.now();
+    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+    final delay = nextMidnight.difference(now);
+    _autoSyncTimer = Timer(delay, () async {
+      await _runAutoSyncIfDue();
+      _scheduleDailyAutoSync();
+    });
+  }
+
+  Future<void> _syncBackgroundAutoSyncSchedule() async {
+    await Workmanager().cancelByUniqueName(dailyAutoSyncTask);
+    if (!_autoSyncEnabled) return;
+    await Workmanager().registerPeriodicTask(
+      dailyAutoSyncTask,
+      dailyAutoSyncTask,
+      frequency: const Duration(hours: 24),
+      constraints: Constraints(networkType: NetworkType.connected),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
+    );
+  }
+
+  Future<void> _runAutoSyncIfDue() async {
+    final store = _store;
+    if (store == null || !_autoSyncEnabled || _syncing) return;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final lastAttempt = store.loadLastAutoSyncAttemptAt();
+    final alreadyAttemptedToday =
+        lastAttempt != null && !lastAttempt.isBefore(today);
+    if (alreadyAttemptedToday) return;
+
+    await store.saveLastAutoSyncAttemptAt(now);
+    await _syncData(showFeedback: false);
+  }
+
+  Future<bool> _hasInternetConnection() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      return !results.contains(ConnectivityResult.none);
+    } catch (error, stackTrace) {
+      debugPrint('Connectivity check failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return false;
+    }
   }
 
   void _showDriveSnackBar({
@@ -746,8 +950,46 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     return message;
   }
 
+  String _syncUserMessage(String rawMessage) {
+    final lower = rawMessage.toLowerCase();
+    if (lower.contains('internet') ||
+        lower.contains('network') ||
+        lower.contains('socket') ||
+        lower.contains('host lookup')) {
+      return 'No internet connection. Please try again online.';
+    }
+    if (lower.contains('auth') ||
+        lower.contains('sign in') ||
+        lower.contains('unauthorized') ||
+        lower.contains('permission')) {
+      return 'Google Drive authorization failed. Please reconnect and try again.';
+    }
+    if (lower.contains('timeout') || lower.contains('timed out')) {
+      return 'Sync timed out. Please try again.';
+    }
+    if (lower.contains('cancel') ||
+        lower.contains('canceled') ||
+        lower.contains('aborted')) {
+      return 'Sync was cancelled.';
+    }
+    return 'Sync could not complete. Please try again.';
+  }
+
+  void _resetNeedsFilters({NeedStatusFilter status = NeedStatusFilter.all}) {
+    _needsGroupFilter = 'All';
+    _needsUrgencyFilter = NeedUrgencyFilter.all;
+    _needsStatusFilter = status;
+    _needsQuery = '';
+    _needsSortOption = NeedSortOption.newest;
+  }
+
   void _selectTab(AppTab tab) {
-    setState(() => _selectedTab = tab);
+    setState(() {
+      if (tab == AppTab.needs && _selectedTab != AppTab.needs) {
+        _resetNeedsFilters();
+      }
+      _selectedTab = tab;
+    });
   }
 
   void _openContactsForBloodGroup(String group) {
@@ -789,19 +1031,46 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
   void _openNeedsWithStatus(NeedStatusFilter status) {
     setState(() {
       _selectedTab = AppTab.needs;
-      _needsGroupFilter = 'All';
-      _needsUrgencyFilter = NeedUrgencyFilter.all;
-      _needsStatusFilter = status;
+      _resetNeedsFilters(status: status);
     });
   }
 
   void _openNeedsTab() {
     setState(() {
       _selectedTab = AppTab.needs;
-      _needsGroupFilter = 'All';
-      _needsUrgencyFilter = NeedUrgencyFilter.all;
-      _needsStatusFilter = NeedStatusFilter.all;
+      _resetNeedsFilters();
     });
+  }
+
+  Future<bool> _shouldExitOnBack() async {
+    if (_selectedTab != AppTab.home) {
+      setState(() => _selectedTab = AppTab.home);
+      return false;
+    }
+
+    final now = DateTime.now();
+    final pressedRecently =
+        _lastBackPressedAt != null &&
+        now.difference(_lastBackPressedAt!) <= const Duration(seconds: 2);
+
+    if (pressedRecently) {
+      return true;
+    }
+
+    _lastBackPressedAt = now;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Press back again to exit app'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+    return false;
+  }
+
+  Future<void> _handleBackAttempt() async {
+    final shouldExit = await _shouldExitOnBack();
+    if (!shouldExit) return;
+    await SystemNavigator.pop();
   }
 
   Future<void> _refreshNotifications({
@@ -814,20 +1083,24 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     final lastSyncStatus = currentStore.loadLastSyncStatus();
     final syncHistory = currentStore.loadSyncHistory();
     final now = DateTime.now();
+    final suppressSyncNotifications = _onboardingRestoreInProgress;
 
-    if (_notifySyncFailed && lastSyncStatus == 'failed') {
+    if (!suppressSyncNotifications &&
+        _notifySyncFailed &&
+        !_notifySyncEvents &&
+        lastSyncStatus == 'failed') {
       await currentStore.upsertNotification(
         code: 'sync_failed',
         title: 'Your last sync failed',
         message:
             'Please sync your contacts again to keep your blood network safe.',
       );
-    } else {
+    } else if (!suppressSyncNotifications) {
       await currentStore.deleteNotificationByCode('sync_failed');
     }
 
-    final lastSyncedAt = syncHistory.isEmpty ? null : syncHistory.first;
-    if (lastSyncedAt != null) {
+    final lastSyncedAt = syncHistory.isEmpty ? null : syncHistory.first.at;
+    if (!suppressSyncNotifications && lastSyncedAt != null) {
       final days = now.difference(lastSyncedAt).inDays;
       if (_notifySyncStale && days >= 1) {
         await currentStore.upsertNotification(
@@ -839,7 +1112,7 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
       } else {
         await currentStore.deleteNotificationByCode('sync_stale');
       }
-    } else {
+    } else if (!suppressSyncNotifications) {
       await currentStore.deleteNotificationByCode('sync_stale');
     }
 
@@ -859,15 +1132,42 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
     }
 
     if (_showContinueChoice) {
-      return Scaffold(
-        backgroundColor: const Color(0xfffffbf7),
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 26, 20, 20),
-            child: _ContinueSetupPage(
-              loading: _syncing || _connectingDrive,
-              onRestore: _completeOnboardingAndRestore,
-              onStartNew: _completeOnboardingAsNew,
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (_, _) => _handleBackAttempt(),
+        child: Scaffold(
+          backgroundColor: Colors.white,
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 26, 20, 20),
+              child: _ContinueSetupPage(
+                loading: _syncing || _connectingDrive,
+                onRestore: _completeOnboardingAndRestore,
+                onStartNew: _completeOnboardingAsNew,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    if (_showRestoreProgress) {
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (_, _) => _handleBackAttempt(),
+        child: Scaffold(
+          backgroundColor: Colors.white,
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 26, 20, 20),
+              child: _RestoreSyncProgressPage(
+                syncing: _syncing,
+                readyToContinue: _restoreReadyToContinue,
+                failed: _restoreFailed,
+                syncedContacts: _restoreSyncedContacts,
+                syncedNeeds: _restoreSyncedNeeds,
+                syncedAt: _restoreSyncedAt,
+                onContinue: _finishRestoreFlow,
+              ),
             ),
           ),
         ),
@@ -950,6 +1250,14 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
         initialGroup: _needsGroupFilter,
         initialUrgency: _needsUrgencyFilter,
         initialStatus: _needsStatusFilter,
+        initialQuery: _needsQuery,
+        initialSort: _needsSortOption,
+        onQueryChanged: (value) => setState(() => _needsQuery = value),
+        onGroupChanged: (value) => setState(() => _needsGroupFilter = value),
+        onUrgencyChanged: (value) =>
+            setState(() => _needsUrgencyFilter = value),
+        onStatusChanged: (value) => setState(() => _needsStatusFilter = value),
+        onSortChanged: (value) => setState(() => _needsSortOption = value),
         onOpenDetails: _openNeedDetails,
         onAddNeed: _openNewNeed,
       ),
@@ -964,9 +1272,16 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
         onConnectDrive: _connectGoogleDrive,
         onSyncData: _syncData,
         onDisconnectDrive: _showDriveUnlinkOptions,
-        onAutoSyncChanged: (value) => setState(() {
-          _autoSyncEnabled = value;
-        }),
+        onAutoSyncChanged: (value) async {
+          await _store?.saveAutoSyncEnabled(value);
+          if (!mounted) return;
+          setState(() => _autoSyncEnabled = value);
+          _scheduleDailyAutoSync();
+          await _syncBackgroundAutoSyncSchedule();
+          if (value) {
+            await _runAutoSyncIfDue();
+          }
+        },
         onBackupHistory: _openSyncHistory,
         onAppearance: _openThemePreference,
         onNotificationList: _openNotifications,
@@ -979,14 +1294,18 @@ class _BloodContactsHomeState extends State<BloodContactsHome> {
       ),
     };
 
-    return Scaffold(
-      body: body,
-      bottomNavigationBar: BloodBottomNavigation(
-        selectedTab: _selectedTab,
-        onHome: () => _selectTab(AppTab.home),
-        onContacts: _openAllContacts,
-        onNeeds: () => _selectTab(AppTab.needs),
-        onProfile: () => _selectTab(AppTab.profile),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (_, _) => _handleBackAttempt(),
+      child: Scaffold(
+        body: body,
+        bottomNavigationBar: BloodBottomNavigation(
+          selectedTab: _selectedTab,
+          onHome: () => _selectTab(AppTab.home),
+          onContacts: _openAllContacts,
+          onNeeds: () => _selectTab(AppTab.needs),
+          onProfile: () => _selectTab(AppTab.profile),
+        ),
       ),
     );
   }
@@ -1005,48 +1324,85 @@ class _ContinueSetupPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'How do you want to continue?',
-          style: TextStyle(
-            color: Color(0xff201716),
-            fontSize: 28,
-            fontWeight: FontWeight.w900,
-            height: 1.1,
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: IntrinsicHeight(
+            child: Column(
+              children: [
+                const SizedBox(height: 6),
+                const _WelcomeIllustration(),
+                const SizedBox(height: 18),
+                const Text(
+                  'Welcome to',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xff111111),
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Blood Contacts',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xffdf0b1d),
+                    fontSize: 24,
+                    height: 1.05,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Never lose important blood contacts again.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xff5b5b67),
+                    fontSize: 13,
+                    height: 1.35,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _ContinueOptionCard(
+                  icon: Icons.person_add_alt_1_rounded,
+                  title: 'Start as a new',
+                  subtitle: 'Start with a fresh contact list',
+                  iconColor: const Color(0xffdf0b1d),
+                  iconBackground: const Color(0xfffff2f3),
+                  cardBackground: const Color(0xfffff6f7),
+                  borderColor: const Color(0xffffe2e5),
+                  titleColor: const Color(0xff43201f),
+                  onTap: loading ? null : onStartNew,
+                ),
+                const SizedBox(height: 12),
+                _ContinueOptionCard(
+                  icon: FontAwesomeIcons.googleDrive,
+                  title: 'Connect Google Drive',
+                  subtitle:
+                      'Find your saved contacts and continue where you left off',
+                  iconColor: const Color(0xff1f8d3f),
+                  iconBackground: const Color(0xffecf7ef),
+                  cardBackground: const Color(0xfff3fbf5),
+                  borderColor: const Color(0xffdbeede),
+                  titleColor: const Color(0xff177235),
+                  onTap: loading ? null : onRestore,
+                ),
+                if (loading) ...[
+                  const SizedBox(height: 14),
+                  const Center(
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  ),
+                ],
+                const Spacer(),
+                const _WelcomeFooterNote(),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 10),
-        const Text(
-          'Choose restore if you used this app before. Choose start new if this is your first time.',
-          style: TextStyle(
-            color: Color(0xff665653),
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 22),
-        _ContinueOptionCard(
-          icon: Icons.cloud_sync_outlined,
-          title: 'Restore from Google Drive',
-          subtitle:
-              'Used this app before? Connect Drive and get your contacts and needs back.',
-          onTap: loading ? null : onRestore,
-        ),
-        const SizedBox(height: 12),
-        _ContinueOptionCard(
-          icon: Icons.person_add_alt_1_outlined,
-          title: 'Start as New',
-          subtitle:
-              'I am new here. I want to start with an empty contact list.',
-          onTap: loading ? null : onStartNew,
-        ),
-        if (loading) ...[
-          const SizedBox(height: 16),
-          const Center(child: CircularProgressIndicator()),
-        ],
-      ],
+      ),
     );
   }
 }
@@ -1056,39 +1412,49 @@ class _ContinueOptionCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    required this.iconColor,
+    required this.iconBackground,
+    required this.cardBackground,
+    required this.borderColor,
+    required this.titleColor,
     required this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final Color iconColor;
+  final Color iconBackground;
+  final Color cardBackground;
+  final Color borderColor;
+  final Color titleColor;
   final Future<void> Function()? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
+      color: cardBackground,
+      borderRadius: BorderRadius.circular(18),
       child: InkWell(
         onTap: onTap == null ? null : () => onTap!.call(),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xffffe5df)),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: borderColor),
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 58,
+                height: 58,
                 decoration: BoxDecoration(
-                  color: const Color(0xffffeef0),
-                  borderRadius: BorderRadius.circular(12),
+                  color: iconBackground,
+                  shape: BoxShape.circle,
                 ),
-                child: Icon(icon, color: const Color(0xffd90416), size: 22),
+                child: Icon(icon, color: iconColor, size: 30),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1097,18 +1463,18 @@ class _ContinueOptionCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
-                        color: Color(0xff201716),
-                        fontSize: 16,
+                      style: TextStyle(
+                        color: titleColor,
+                        fontSize: 18,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 5),
                     Text(
                       subtitle,
                       style: const TextStyle(
                         color: Color(0xff665653),
-                        fontSize: 13,
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
                         height: 1.3,
                       ),
@@ -1117,10 +1483,376 @@ class _ContinueOptionCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              const Icon(Icons.chevron_right, color: Color(0xff7d6c69)),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xff8d8f98),
+                size: 30,
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _RestoreSyncProgressPage extends StatelessWidget {
+  const _RestoreSyncProgressPage({
+    required this.syncing,
+    required this.readyToContinue,
+    required this.failed,
+    required this.syncedContacts,
+    required this.syncedNeeds,
+    required this.syncedAt,
+    required this.onContinue,
+  });
+
+  final bool syncing;
+  final bool readyToContinue;
+  final bool failed;
+  final int syncedContacts;
+  final int syncedNeeds;
+  final DateTime? syncedAt;
+  final Future<void> Function() onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    final searchingDone = readyToContinue;
+    final preparingDone = readyToContinue;
+    final searchingActive = syncing;
+
+    return Column(
+      children: [
+        const SizedBox(height: 34),
+        Container(
+          width: 156,
+          height: 156,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xffd9ece0), width: 8),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (syncing)
+                const SizedBox(
+                  width: 142,
+                  height: 142,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 6,
+                    valueColor: AlwaysStoppedAnimation(Color(0xff19a34a)),
+                  ),
+                ),
+              const FaIcon(
+                FontAwesomeIcons.googleDrive,
+                size: 46,
+                color: Color(0xff649e6a),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 26),
+        Text(
+          failed
+              ? 'Could not restore backup'
+              : readyToContinue
+              ? 'Sync Completed'
+              : 'Searching for your backup...',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xff111111),
+            fontSize: 38 / 2,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          failed
+              ? 'Please check internet and try again.'
+              : readyToContinue
+              ? 'Review completed. You can continue now.'
+              : 'Please wait a moment',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xff666674),
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 26),
+        if (readyToContinue && !failed) ...[
+          _RestoreSummaryCard(
+            contacts: syncedContacts,
+            needs: syncedNeeds,
+            syncedAt: syncedAt,
+          ),
+          const SizedBox(height: 18),
+        ],
+        _RestoreStepRow(
+          label: 'Connecting to Google Drive',
+          state: _RestoreStepState.done,
+        ),
+        const SizedBox(height: 14),
+        _RestoreStepRow(
+          label: 'Searching for Blood Contacts backup',
+          state: searchingDone
+              ? _RestoreStepState.done
+              : searchingActive
+              ? _RestoreStepState.active
+              : _RestoreStepState.pending,
+        ),
+        const SizedBox(height: 14),
+        _RestoreStepRow(
+          label: 'Preparing your data',
+          state: preparingDone
+              ? failed
+                    ? _RestoreStepState.pending
+                    : _RestoreStepState.done
+              : _RestoreStepState.pending,
+        ),
+        const SizedBox(height: 26),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: const Color(0xfff0faf2),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xffd8ecdd)),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.lightbulb_outline, color: Color(0xff1f8d3f), size: 22),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Tip\nMake sure you are connected to the internet.',
+                  style: TextStyle(
+                    color: Color(0xff2f4a36),
+                    fontSize: 13.5,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Spacer(),
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: FilledButton(
+            onPressed: readyToContinue ? onContinue : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xffdf0b1d),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            child: Text(readyToContinue ? 'Continue' : 'Please wait...'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+enum _RestoreStepState { done, active, pending }
+
+class _RestoreStepRow extends StatelessWidget {
+  const _RestoreStepRow({required this.label, required this.state});
+
+  final String label;
+  final _RestoreStepState state;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget leading;
+    if (state == _RestoreStepState.done) {
+      leading = const Icon(
+        Icons.check_circle,
+        color: Color(0xff19a34a),
+        size: 22,
+      );
+    } else if (state == _RestoreStepState.active) {
+      leading = const SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.3,
+          valueColor: AlwaysStoppedAnimation(Color(0xffdf0b1d)),
+        ),
+      );
+    } else {
+      leading = const Icon(
+        Icons.circle_outlined,
+        color: Color(0xffadb0bb),
+        size: 22,
+      );
+    }
+
+    return Row(
+      children: [
+        leading,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xff32323d),
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RestoreSummaryCard extends StatelessWidget {
+  const _RestoreSummaryCard({
+    required this.contacts,
+    required this.needs,
+    required this.syncedAt,
+  });
+
+  final int contacts;
+  final int needs;
+  final DateTime? syncedAt;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xfff2faf4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xffd8ebdc)),
+      ),
+      child: Column(
+        children: [
+          _SummaryRow(
+            icon: Icons.groups_2_outlined,
+            text: '$contacts contacts synced',
+          ),
+          const SizedBox(height: 10),
+          _SummaryRow(
+            icon: Icons.volunteer_activism_outlined,
+            text: '$needs needs synced',
+          ),
+          const SizedBox(height: 10),
+          _SummaryRow(
+            icon: Icons.schedule_outlined,
+            text: syncedAt == null
+                ? 'Last synced: just now'
+                : 'Last synced: ${_formatRestoreSyncedAt(syncedAt!)}',
+          ),
+          const SizedBox(height: 10),
+          const _SummaryRow(
+            icon: Icons.cloud_done_outlined,
+            text: 'Synced from: Google Drive',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: const Color(0xff1f8d3f)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Color(0xff1d2b22),
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _formatRestoreSyncedAt(DateTime date) {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final hour12 = date.hour % 12 == 0 ? 12 : date.hour % 12;
+  final minute = date.minute.toString().padLeft(2, '0');
+  final suffix = date.hour >= 12 ? 'PM' : 'AM';
+  return '${date.day} ${months[date.month - 1]} ${date.year}, $hour12:$minute $suffix';
+}
+
+class _WelcomeIllustration extends StatelessWidget {
+  const _WelcomeIllustration();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 310,
+      child: Image.asset(
+        'assets/onboarding/fresh_welcome_illustration.png',
+        fit: BoxFit.contain,
+      ),
+    );
+  }
+}
+
+class _WelcomeFooterNote extends StatelessWidget {
+  const _WelcomeFooterNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 22),
+      padding: const EdgeInsets.fromLTRB(6, 14, 6, 4),
+      child: const Row(
+        children: [
+          Icon(Icons.shield_outlined, size: 24, color: Color(0xff22222a)),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Your data stays in your Google Drive.\nWe never share your information.',
+              style: TextStyle(
+                color: Color(0xff3d3d46),
+                fontSize: 12.5,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'package:blood_contacts/src/app/app_theme.dart';
+import 'package:blood_contacts/src/features/contacts/data/contacts_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as phone_contacts;
 
@@ -32,7 +33,7 @@ class ProfilePage extends StatelessWidget {
   final bool syncing;
   final bool connectingDrive;
   final bool autoSyncEnabled;
-  final List<DateTime> syncHistory;
+  final List<SyncHistoryEntry> syncHistory;
   final String? lastSyncStatus;
   final int notificationCount;
   final VoidCallback onConnectDrive;
@@ -52,7 +53,7 @@ class ProfilePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lastSyncedAt = syncHistory.isEmpty ? null : syncHistory.first;
+    final lastSyncedAt = syncHistory.isEmpty ? null : syncHistory.first.at;
 
     return ColoredBox(
       color: const Color(0xfffffbf7),
@@ -68,8 +69,8 @@ class ProfilePage extends StatelessWidget {
                     onSettings: onAppearance,
                     notificationCount: notificationCount,
                   ),
-                  const SizedBox(height: 24),
-                  const _SectionTitle('Google Drive'),
+                  const SizedBox(height: 28),
+                  const _SectionTitle(title: 'Backup & Sync'),
                   const SizedBox(height: 12),
                   _DriveStatusCard(
                     connected: _driveConnected,
@@ -97,8 +98,8 @@ class ProfilePage extends StatelessWidget {
                       onTap: onBackupHistory,
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  const _SectionTitle('Privacy & Security'),
+                  const SizedBox(height: 26),
+                  const _SectionTitle(title: 'Privacy & Security'),
                   const SizedBox(height: 12),
                   _SettingsCard(
                     child: Column(
@@ -108,7 +109,6 @@ class ProfilePage extends StatelessWidget {
                           iconColor: const Color(0xffc47a00),
                           iconBackground: const Color(0xfffff5dc),
                           title: 'Notifications',
-                          subtitle: 'Manage reminder preferences',
                           onTap: onNotificationPreferences,
                         ),
                         const _CardDivider(),
@@ -117,7 +117,6 @@ class ProfilePage extends StatelessWidget {
                           iconColor: const Color(0xff119048),
                           iconBackground: const Color(0xffeaf8ed),
                           title: 'Privacy & Data',
-                          subtitle: 'Your data stays on your device',
                           onTap: onPrivacy,
                         ),
                         const _CardDivider(),
@@ -126,14 +125,13 @@ class ProfilePage extends StatelessWidget {
                           iconColor: const Color(0xffff8a00),
                           iconBackground: const Color(0xfffff0df),
                           title: 'Permissions',
-                          subtitle: 'Manage app permissions',
                           onTap: onPermissions,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  const _SectionTitle('Preference'),
+                  const SizedBox(height: 26),
+                  const _SectionTitle(title: 'Appearance'),
                   const SizedBox(height: 12),
                   _SettingsCard(
                     child: _SettingsTile(
@@ -141,12 +139,11 @@ class ProfilePage extends StatelessWidget {
                       iconColor: const Color(0xff8b2be2),
                       iconBackground: const Color(0xfff5eaff),
                       title: 'Theme',
-                      subtitle: 'Default',
                       onTap: onAppearance,
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  const _SectionTitle('About'),
+                  const SizedBox(height: 26),
+                  const _SectionTitle(title: 'About'),
                   const SizedBox(height: 12),
                   _SettingsCard(
                     child: Column(
@@ -156,7 +153,6 @@ class ProfilePage extends StatelessWidget {
                           iconColor: const Color(0xff4b5565),
                           iconBackground: const Color(0xfff1f2f4),
                           title: 'About Blood Contacts',
-                          subtitle: 'Version 1.0.0',
                           onTap: onAbout,
                         ),
                         const _CardDivider(),
@@ -165,7 +161,6 @@ class ProfilePage extends StatelessWidget {
                           iconColor: const Color(0xffe5161d),
                           iconBackground: const Color(0xffffeef0),
                           title: 'Rate Us',
-                          subtitle: 'If you like the app, please rate us',
                           onTap: onRate,
                         ),
                       ],
@@ -205,18 +200,19 @@ class _ProfileHeader extends StatelessWidget {
                 'Profile',
                 style: TextStyle(
                   color: Color(0xff201716),
-                  fontSize: AppFontSizes.pageTitle,
-                  height: 1.05,
+                  fontSize: 30,
+                  height: 1.1,
                   fontWeight: FontWeight.w900,
                 ),
               ),
               SizedBox(height: 8),
               Text(
-                'A quiet place for backup and app preferences',
+                'Keep everything calm, safe, and easy to manage.',
                 style: TextStyle(
-                  color: Color(0xff665653),
-                  fontSize: AppFontSizes.bodyText,
-                  fontWeight: FontWeight.w600,
+                  color: Color(0xff6f605c),
+                  fontSize: 15,
+                  height: 1.3,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -304,18 +300,18 @@ class _HeaderIconButton extends StatelessWidget {
 }
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text);
+  const _SectionTitle({required this.title});
 
-  final String text;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
     return Text(
-      text,
+      title,
       style: const TextStyle(
         color: Color(0xff231816),
         fontSize: AppFontSizes.sectionTitle,
-        fontWeight: FontWeight.w900,
+        fontWeight: FontWeight.w800,
       ),
     );
   }
@@ -329,15 +325,16 @@ class _SettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      margin: const EdgeInsets.only(bottom: 2),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xffffe5df)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xffffe9e2)),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x0f7a2a1e),
-            blurRadius: 22,
-            offset: Offset(0, 10),
+            color: Color(0x0d7a2a1e),
+            blurRadius: 24,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -670,7 +667,8 @@ class _SyncHistoryTile extends StatelessWidget {
               Row(
                 children: [
                   const SizedBox(width: 40),
-                  if (lastSyncedAt != null) _LastSyncedBadge(date: lastSyncedAt!),
+                  if (lastSyncedAt != null)
+                    _LastSyncedBadge(date: lastSyncedAt!),
                   if (lastSyncedAt != null && lastSyncStatus != null)
                     const SizedBox(width: 8),
                   if (lastSyncStatus != null)
@@ -748,8 +746,20 @@ class _SyncStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final failed = status == 'failed';
-    final color = failed ? const Color(0xffc71421) : const Color(0xff119048);
+    final color = switch (status) {
+      'success' => const Color(0xff119048),
+      'failed' => const Color(0xffc71421),
+      'cancelled' => const Color(0xfff59e0b),
+      'terminated' => const Color(0xff7d5a50),
+      _ => const Color(0xff8b807d),
+    };
+    final label = switch (status) {
+      'success' => 'Success',
+      'failed' => 'Failed',
+      'cancelled' => 'Cancelled',
+      'terminated' => 'Terminated',
+      _ => 'Unknown',
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -757,7 +767,7 @@ class _SyncStatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        failed ? 'Failed' : 'Success',
+        label,
         style: TextStyle(
           color: color,
           fontSize: 10,
@@ -775,12 +785,13 @@ class ProfileSyncHistoryPage extends StatelessWidget {
     required this.driveConnected,
   });
 
-  final List<DateTime> syncHistory;
+  final List<SyncHistoryEntry> syncHistory;
   final bool driveConnected;
 
   @override
   Widget build(BuildContext context) {
-    final sortedHistory = [...syncHistory]..sort((a, b) => b.compareTo(a));
+    final sortedHistory = [...syncHistory]
+      ..sort((a, b) => b.at.compareTo(a.at));
 
     return Scaffold(
       backgroundColor: const Color(0xfffffbf7),
@@ -800,7 +811,7 @@ class ProfileSyncHistoryPage extends StatelessWidget {
               _EmptyHistory(enabled: driveConnected)
             else
               for (final entry in sortedHistory)
-                _HistoryRow(date: entry, latest: entry == sortedHistory.first),
+                _HistoryRow(entry: entry, latest: entry == sortedHistory.first),
           ],
         ),
       ),
@@ -1011,9 +1022,15 @@ class ProfilePrivacyDataPage extends StatelessWidget {
                 children: [
                   _InfoRow(label: 'Primary storage', value: 'On-device SQLite'),
                   _CardDivider(),
-                  _InfoRow(label: 'Sync provider', value: 'Google Drive (optional)'),
+                  _InfoRow(
+                    label: 'Sync provider',
+                    value: 'Google Drive (optional)',
+                  ),
                   _CardDivider(),
-                  _InfoRow(label: 'Sync behavior', value: 'Manual unless auto-sync is enabled'),
+                  _InfoRow(
+                    label: 'Sync behavior',
+                    value: 'Manual unless auto-sync is enabled',
+                  ),
                 ],
               ),
             ),
@@ -1351,16 +1368,38 @@ class _EmptyHistory extends StatelessWidget {
 }
 
 class _HistoryRow extends StatelessWidget {
-  const _HistoryRow({required this.date, required this.latest});
+  const _HistoryRow({required this.entry, required this.latest});
 
-  final DateTime date;
+  final SyncHistoryEntry entry;
   final bool latest;
 
   @override
   Widget build(BuildContext context) {
+    final statusLabel = switch (entry.status) {
+      'success' => 'Success',
+      'failed' => 'Failed',
+      'cancelled' => 'Cancelled',
+      'terminated' => 'Terminated',
+      _ => 'Unknown',
+    };
+    final statusColor = switch (entry.status) {
+      'success' => const Color(0xff119048),
+      'failed' => const Color(0xffc71421),
+      'cancelled' => const Color(0xfff59e0b),
+      'terminated' => const Color(0xff7d5a50),
+      _ => const Color(0xff8b807d),
+    };
+    final statusIcon = switch (entry.status) {
+      'success' => Icons.check_circle,
+      'failed' => Icons.error,
+      'cancelled' => Icons.remove_circle,
+      'terminated' => Icons.stop_circle,
+      _ => Icons.schedule,
+    };
+    final hasCounts = entry.contactCount != null || entry.needCount != null;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: latest ? const Color(0xfffff1ed) : const Color(0xfffffbf8),
         borderRadius: BorderRadius.circular(13),
@@ -1368,34 +1407,95 @@ class _HistoryRow extends StatelessWidget {
           color: latest ? const Color(0xffffc5b9) : const Color(0xffffe8e0),
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            latest ? Icons.check_circle : Icons.schedule,
-            color: latest ? const Color(0xffe5161d) : const Color(0xff8b807d),
-            size: 18,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              _formatDateTime(date),
-              style: const TextStyle(
-                color: Color(0xff413431),
-                fontSize: AppFontSizes.bodyText,
-                fontWeight: FontWeight.w800,
+          Row(
+            children: [
+              Icon(statusIcon, color: statusColor, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _formatDateTime(entry.at),
+                  style: const TextStyle(
+                    color: Color(0xff413431),
+                    fontSize: AppFontSizes.bodyText,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
-            ),
-          ),
-          if (latest)
-            const Text(
-              'Latest',
-              style: TextStyle(
-                color: Color(0xffe5161d),
-                fontSize: AppFontSizes.smallMetadata,
-                fontWeight: FontWeight.w900,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  statusLabel,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: AppFontSizes.smallMetadata,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
+              if (latest)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Text(
+                    'Latest',
+                    style: TextStyle(
+                      color: Color(0xffe5161d),
+                      fontSize: AppFontSizes.smallMetadata,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (hasCounts) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _HistoryCountChip(
+                  label: '${entry.contactCount ?? 0} contacts',
+                  color: const Color(0xff245d94),
+                ),
+                const SizedBox(width: 8),
+                _HistoryCountChip(
+                  label: '${entry.needCount ?? 0} needs',
+                  color: const Color(0xff7a4d00),
+                ),
+              ],
             ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _HistoryCountChip extends StatelessWidget {
+  const _HistoryCountChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }
@@ -1407,7 +1507,6 @@ class _SettingsTile extends StatelessWidget {
     required this.iconColor,
     required this.iconBackground,
     required this.title,
-    required this.subtitle,
     required this.onTap,
   });
 
@@ -1415,7 +1514,6 @@ class _SettingsTile extends StatelessWidget {
   final Color iconColor;
   final Color iconBackground;
   final String title;
-  final String subtitle;
   final VoidCallback onTap;
 
   @override
@@ -1441,32 +1539,15 @@ class _SettingsTile extends StatelessWidget {
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xff201716),
-                        fontSize: AppFontSizes.cardTitle,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xff675854),
-                        fontSize: AppFontSizes.bodyText,
-                        fontWeight: FontWeight.w600,
-                        height: 1.22,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xff201716),
+                    fontSize: AppFontSizes.cardTitle,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),

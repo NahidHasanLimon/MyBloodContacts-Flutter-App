@@ -132,20 +132,30 @@ class _NotificationsPageState extends State<NotificationsPage> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          item.message,
+                          _humanizeNotificationMessage(item),
                           style: const TextStyle(
                             color: Color(0xff5f5351),
                             height: 1.3,
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _formatNotificationTime(item.createdAt),
-                          style: const TextStyle(
-                            color: Color(0xff8b7f7d),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.schedule_outlined,
+                              size: 14,
+                              color: Color(0xff665653),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _formatNotificationTime(item.createdAt),
+                              style: const TextStyle(
+                                color: Color(0xff665653),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -155,6 +165,41 @@ class _NotificationsPageState extends State<NotificationsPage> {
             ),
     );
   }
+}
+
+String _humanizeNotificationMessage(AppNotification item) {
+  final raw = item.message.trim();
+  final lower = raw.toLowerCase();
+  final isSyncRelated = item.code.startsWith('sync_');
+  if (!isSyncRelated) return raw;
+
+  if (lower.contains('internet') ||
+      lower.contains('network') ||
+      lower.contains('socket') ||
+      lower.contains('host lookup')) {
+    return 'No internet connection. Please try again online.';
+  }
+  if (lower.contains('auth') ||
+      lower.contains('sign in') ||
+      lower.contains('unauthorized') ||
+      lower.contains('permission')) {
+    return 'Google Drive authorization failed. Please reconnect and try again.';
+  }
+  if (lower.contains('timeout') || lower.contains('timed out')) {
+    return 'Sync timed out. Please try again.';
+  }
+  if (lower.contains('cancel') ||
+      lower.contains('canceled') ||
+      lower.contains('aborted')) {
+    return 'Sync was cancelled.';
+  }
+  if (lower.contains('exception:') ||
+      lower.contains('stateerror:') ||
+      lower.contains('typeerror') ||
+      lower.contains('missingpluginexception')) {
+    return 'Sync could not complete. Please try again.';
+  }
+  return raw;
 }
 
 String _formatNotificationTime(DateTime createdAt) {

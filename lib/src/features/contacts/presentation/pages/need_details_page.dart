@@ -2,6 +2,7 @@ import 'package:blood_contacts/src/app/app_theme.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_contact.dart';
 import 'package:blood_contacts/src/features/contacts/domain/blood_need_request.dart';
 import 'package:blood_contacts/src/features/contacts/presentation/pages/new_need_page.dart';
+import 'package:blood_contacts/src/features/contacts/presentation/widgets/contact_common_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -46,13 +47,13 @@ class _NeedDetailsPageState extends State<NeedDetailsPage> {
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
+              padding: const EdgeInsets.fromLTRB(10, 12, 10, 20),
               sliver: SliverList.list(
                 children: [
                   _NeedDetailsHeader(
                     onBack: () => Navigator.pop(context),
                     onShare: () => _shareNeed(context),
-                    onEdit: actionsLocked ? null : () => _editNeed(context),
+                    onEdit: () => _editNeed(context),
                     onClose: actionsLocked
                         ? null
                         : () => _closeRequest(context),
@@ -76,7 +77,7 @@ class _NeedDetailsPageState extends State<NeedDetailsPage> {
                   ),
                   const SizedBox(height: 10),
                   _PotentialDonorsCard(
-                    count: 0,
+                    count: _need.potentialDonorIds.length,
                     onViewAll: () => _showPotentialDonors(context),
                   ),
                 ],
@@ -204,17 +205,24 @@ class _NeedDetailsPageState extends State<NeedDetailsPage> {
                       ),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
-                        backgroundColor: const Color(0xff16a34a),
+                        backgroundColor: _need.status == NeedStatus.fulfilled
+                            ? const Color(0xff16a34a)
+                            : Colors.white,
                         disabledBackgroundColor:
                             _need.status == NeedStatus.fulfilled
                             ? const Color(0xff16a34a)
                             : null,
-                        foregroundColor: Colors.white,
+                        foregroundColor: _need.status == NeedStatus.fulfilled
+                            ? Colors.white
+                            : const Color(0xff16a34a),
                         disabledForegroundColor:
                             _need.status == NeedStatus.fulfilled
                             ? Colors.white
                             : null,
-                        iconColor: const Color(0xffeafff2),
+                        iconColor: _need.status == NeedStatus.fulfilled
+                            ? const Color(0xffeafff2)
+                            : const Color(0xff16a34a),
+                        side: const BorderSide(color: Color(0xffb9dfc7)),
                         textStyle: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w900,
@@ -249,7 +257,7 @@ Units needed: ${_need.units}
 Hospital: ${_need.hospital}
 Needed on: ${_need.date}, ${_need.time}
 Requested by: ${_need.requester}
-Contact: ${_need.phone}
+Contact: ${_need.contactPersonPhone}
 Description: ${_need.summary}
 '''
                 .trim(),
@@ -260,40 +268,50 @@ Description: ${_need.summary}
     );
   }
 
-  void _showPotentialDonors(BuildContext context) {
-    showModalBottomSheet<void>(
+  Future<void> _showPotentialDonors(BuildContext context) async {
+    final matchingContacts =
+        widget.contacts
+            .where((contact) => contact.bloodGroup == _need.bloodGroup)
+            .toList()
+          ..sort(sortContacts);
+
+    final selectedDonorIds = await showModalBottomSheet<Set<String>?>(
       context: context,
       showDragHandle: true,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(22, 8, 22, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Potential Donors',
-              style: TextStyle(
-                color: Colors.black,
-                fontSize: AppFontSizes.sectionTitle,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'No contacted donors have been added for this need yet.',
-              style: TextStyle(
-                color: Colors.grey.shade700,
-                fontSize: AppFontSizes.bodyText,
-                height: 1.35,
-              ),
-            ),
-          ],
-        ),
+      builder: (context) => _PotentialDonorSelectionSheet(
+        contacts: matchingContacts,
+        selectedDonorIds: _need.potentialDonorIds.toSet(),
       ),
+    );
+
+    if (selectedDonorIds == null || !context.mounted) return;
+    if (_isSameSelection(_need.potentialDonorIds, selectedDonorIds)) return;
+
+    final updated = _need.copyWith(
+      potentialDonorIds: selectedDonorIds.toList(),
+      updatedAt: DateTime.now(),
+    );
+    setState(() => _need = updated);
+    widget.onChanged(updated);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Potential donor list updated')),
     );
   }
 
+  bool _isSameSelection(List<String> existingIds, Set<String> nextIds) {
+    if (existingIds.length != nextIds.length) return false;
+    return existingIds.toSet().containsAll(nextIds);
+  }
+
   Future<void> _markFulfilled(BuildContext context) async {
+    final confirmed = await showAppConfirmationDialog(
+      context: context,
+      title: 'Mark fulfilled?',
+      message: 'Are you sure you want to mark this need as fulfilled?',
+      confirmLabel: 'Yes, Mark Fulfilled',
+    );
+    if (confirmed != true || !context.mounted) return;
+
     final donor = await showModalBottomSheet<BloodContact?>(
       context: context,
       showDragHandle: true,
@@ -315,22 +333,11 @@ Description: ${_need.summary}
   }
 
   Future<void> _closeRequest(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppConfirmationDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Close request?'),
-        content: const Text('This need will be marked as closed.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Close Request'),
-          ),
-        ],
-      ),
+      title: 'Close request?',
+      message: 'This need will be marked as closed.',
+      confirmLabel: 'Close Request',
     );
     if (confirmed != true || !context.mounted) return;
 
@@ -346,22 +353,11 @@ Description: ${_need.summary}
   }
 
   Future<void> _cancelRequest(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppConfirmationDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancel request?'),
-        content: const Text('This need will be marked as cancelled.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Back'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancel Request'),
-          ),
-        ],
-      ),
+      title: 'Cancel request?',
+      message: 'This need will be marked as cancelled.',
+      confirmLabel: 'Cancel Request',
     );
     if (confirmed != true || !context.mounted) return;
 
@@ -415,7 +411,6 @@ class _NeedDetailsHeader extends StatelessWidget {
           child: Text(
             'Need Details',
             style: TextStyle(
-              color: Colors.black,
               fontSize: AppFontSizes.sectionTitle,
               fontWeight: FontWeight.w900,
             ),
@@ -571,8 +566,12 @@ class _NeedSummaryCard extends StatelessWidget {
           _DetailRow(
             icon: Icons.person_outline,
             label: 'Contact Person',
-            title: need.requester,
-            trailing: _PhoneTrailing(phone: need.phone),
+            title: need.contactPersonName,
+            trailing: _PhoneTrailing(
+              phone: need.contactPersonPhone,
+              showNumber: false,
+            ),
+            subtitle: need.contactPersonPhone,
           ),
           const _SectionDivider(),
           Row(
@@ -599,8 +598,11 @@ class _NeedSummaryCard extends StatelessWidget {
             icon: Icons.person_outline,
             label: 'Requested By',
             title: need.requester,
-            trailing: _PhoneTrailing(phone: need.phone),
-            subtitle: 'Requested date: ${_formatRequestedDate(need.updatedAt)}',
+            labelTrailing: _MetadataValue(
+              value: _formatRequestedDate(need.updatedAt),
+            ),
+            trailing: _PhoneTrailing(phone: need.phone, showNumber: false),
+            subtitle: need.phone,
           ),
           const _SectionDivider(),
           _DetailRow(
@@ -617,24 +619,27 @@ class _NeedSummaryCard extends StatelessWidget {
 }
 
 class _PhoneTrailing extends StatelessWidget {
-  const _PhoneTrailing({required this.phone});
+  const _PhoneTrailing({required this.phone, this.showNumber = true});
 
   final String phone;
+  final bool showNumber;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          phone,
-          style: const TextStyle(
-            color: Color(0xff343741),
-            fontSize: AppFontSizes.bodyText,
-            fontWeight: FontWeight.w700,
+        if (showNumber) ...[
+          Text(
+            phone,
+            style: const TextStyle(
+              color: Color(0xff343741),
+              fontSize: AppFontSizes.bodyText,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        const SizedBox(width: 8),
+          const SizedBox(width: 8),
+        ],
         SizedBox(
           width: 28,
           height: 28,
@@ -643,11 +648,7 @@ class _PhoneTrailing extends StatelessWidget {
             padding: EdgeInsets.zero,
             visualDensity: VisualDensity.compact,
             onPressed: () => _confirmCall(context, phone),
-            icon: const Icon(
-              Icons.call,
-              size: 16,
-              color: Color(0xff16a34a),
-            ),
+            icon: const Icon(Icons.call, size: 16, color: Color(0xff16a34a)),
           ),
         ),
         const SizedBox(width: 6),
@@ -677,22 +678,12 @@ class _PhoneTrailing extends StatelessWidget {
 }
 
 Future<void> _confirmCall(BuildContext context, String phone) async {
-  final confirmed = await showDialog<bool>(
+  final confirmed = await showAppConfirmationDialog(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Call contact?'),
-      content: Text('Do you want to call $phone?'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('No'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Call'),
-        ),
-      ],
-    ),
+    title: 'Call contact?',
+    message: 'Do you want to call $phone?',
+    confirmLabel: 'Call',
+    destructive: false,
   );
   if (confirmed != true || !context.mounted) return;
   final uri = Uri(scheme: 'tel', path: phone);
@@ -843,7 +834,7 @@ class _PotentialDonorsCard extends StatelessWidget {
                 onPressed: onViewAll,
                 iconAlignment: IconAlignment.end,
                 icon: const Icon(Icons.chevron_right, size: 20),
-                label: const Text('See'),
+                label: const Text('See Available'),
                 style: TextButton.styleFrom(
                   foregroundColor: const Color(0xffe5161d),
                 ),
@@ -962,6 +953,210 @@ class _DonorSelectionSheet extends StatelessWidget {
   }
 }
 
+class _PotentialDonorSelectionSheet extends StatefulWidget {
+  const _PotentialDonorSelectionSheet({
+    required this.contacts,
+    required this.selectedDonorIds,
+  });
+
+  final List<BloodContact> contacts;
+  final Set<String> selectedDonorIds;
+
+  @override
+  State<_PotentialDonorSelectionSheet> createState() =>
+      _PotentialDonorSelectionSheetState();
+}
+
+class _PotentialDonorSelectionSheetState
+    extends State<_PotentialDonorSelectionSheet> {
+  String _query = '';
+  late final Set<String> _selectedDonorIds;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDonorIds = {...widget.selectedDonorIds};
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _query.trim().toLowerCase();
+    final filteredContacts = widget.contacts.where((contact) {
+      if (query.isEmpty) return true;
+      return contact.name.toLowerCase().contains(query) ||
+          contact.phone.toLowerCase().contains(query);
+    }).toList();
+    final sheetHeight = MediaQuery.of(context).size.height * 0.72;
+
+    return SafeArea(
+      child: SizedBox(
+        height: sheetHeight,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 8, 22, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Available Donors',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontSize: AppFontSizes.sectionTitle,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Tap a donor to select or unselect.',
+                style: TextStyle(
+                  color: Color(0xff4b5262),
+                  fontSize: AppFontSizes.bodyText,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                onChanged: (value) => setState(() => _query = value),
+                decoration: InputDecoration(
+                  hintText: 'Search by name or phone',
+                  prefixIcon: const Icon(Icons.search),
+                  isDense: true,
+                  filled: true,
+                  fillColor: const Color(0xfff8f8fb),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xffe3e6ee)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xffe3e6ee)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xff9aa4b2)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (widget.contacts.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  child: Text(
+                    'No donors available for this blood group yet.',
+                    style: TextStyle(
+                      color: Color(0xff4b5262),
+                      fontSize: AppFontSizes.bodyText,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                )
+              else if (filteredContacts.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  child: Text(
+                    'No donor matches your search.',
+                    style: TextStyle(
+                      color: Color(0xff4b5262),
+                      fontSize: AppFontSizes.bodyText,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: filteredContacts.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final contact = filteredContacts[index];
+                      final selected = _selectedDonorIds.contains(contact.id);
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          backgroundColor: selected
+                              ? const Color(0xffecedf2)
+                              : const Color(0xffffe3e5),
+                          child: Text(
+                            contact.initials,
+                            style: TextStyle(
+                              color: selected
+                                  ? const Color(0xff757b8a)
+                                  : const Color(0xffe5161d),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          contact.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: selected
+                                ? const Color(0xff757b8a)
+                                : const Color(0xff151722),
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${contact.bloodGroup}  •  ${contact.phone}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: selected
+                            ? const _SelectedPill()
+                            : const Icon(Icons.add, size: 20),
+                        onTap: () {
+                          setState(() {
+                            if (selected) {
+                              _selectedDonorIds.remove(contact.id);
+                            } else {
+                              _selectedDonorIds.add(contact.id);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context, _selectedDonorIds),
+                  child: const Text('Done'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectedPill extends StatelessWidget {
+  const _SelectedPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xffeef1f5),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: const Text(
+        'Selected',
+        style: TextStyle(
+          color: Color(0xff4b5262),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
 class _DetailRow extends StatelessWidget {
   const _DetailRow({
     required this.icon,
@@ -969,6 +1164,7 @@ class _DetailRow extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.trailing,
+    this.labelTrailing,
   });
 
   final IconData icon;
@@ -976,6 +1172,7 @@ class _DetailRow extends StatelessWidget {
   final String title;
   final String? subtitle;
   final Widget? trailing;
+  final Widget? labelTrailing;
 
   @override
   Widget build(BuildContext context) {
@@ -988,13 +1185,23 @@ class _DetailRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Color(0xff4b5262),
-                  fontSize: AppFontSizes.smallMetadata,
-                  fontWeight: FontWeight.w700,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        color: Color(0xff4b5262),
+                        fontSize: AppFontSizes.smallMetadata,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (labelTrailing != null) ...[
+                    const SizedBox(width: 12),
+                    labelTrailing!,
+                  ],
+                ],
               ),
               const SizedBox(height: 4),
               Row(
@@ -1035,6 +1242,26 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _MetadataValue extends StatelessWidget {
+  const _MetadataValue({required this.value});
+
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      value,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        color: Color(0xff4b5262),
+        fontSize: AppFontSizes.smallMetadata,
+        fontWeight: FontWeight.w700,
+      ),
     );
   }
 }

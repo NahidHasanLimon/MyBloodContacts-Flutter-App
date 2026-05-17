@@ -4,6 +4,7 @@ import 'package:blood_contacts/src/features/contacts/presentation/widgets/contac
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AllContactsPage extends StatefulWidget {
   const AllContactsPage({
@@ -392,15 +393,16 @@ class _ContactsSearchBarState extends State<ContactsSearchBar> {
               ),
             ),
           ),
-          IconButton(
-            onPressed: widget.onReset,
-            tooltip: 'Reset',
-            icon: const Icon(
-              Icons.restart_alt,
-              color: Color(0xffe5161d),
-              size: 22,
+          if (widget.query.trim().isNotEmpty)
+            IconButton(
+              onPressed: widget.onReset,
+              tooltip: 'Clear search',
+              icon: const Icon(
+                Icons.backspace_outlined,
+                color: Color(0xffe5161d),
+                size: 20,
+              ),
             ),
-          ),
           const SizedBox(width: 14),
         ],
       ),
@@ -754,7 +756,7 @@ class DetailedContactTile extends StatelessWidget {
                       icon: Icons.phone_outlined,
                       backgroundColor: const Color(0xffeef9f0),
                       foregroundColor: const Color(0xff16a34a),
-                      onPressed: () {},
+                      onPressed: () => _confirmAndCall(context, contact.phone),
                     ),
                     const SizedBox(height: 6),
                     ContactQuickActionButton(
@@ -852,6 +854,25 @@ Remarks: $remarks
             : box.localToGlobal(Offset.zero) & box.size,
       ),
     );
+  }
+
+  Future<void> _confirmAndCall(BuildContext context, String phone) async {
+    final confirmed = await showAppConfirmationDialog(
+      context: context,
+      title: 'Call contact?',
+      message: 'Do you want to call $phone?',
+      confirmLabel: 'Call',
+      destructive: false,
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final uri = Uri(scheme: 'tel', path: phone);
+    final launched = await launchUrl(uri);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open dialer')),
+      );
+    }
   }
 }
 

@@ -6,6 +6,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class DonorDetailsPage extends StatelessWidget {
   const DonorDetailsPage({
@@ -29,7 +30,7 @@ class DonorDetailsPage extends StatelessWidget {
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
               sliver: SliverList.list(
                 children: [
                   _DetailsHeader(
@@ -37,25 +38,28 @@ class DonorDetailsPage extends StatelessWidget {
                     onEdit: onEdit,
                     onDelete: onDelete,
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   _HeroCard(
                     contact: contact,
                     red: red,
-                    onCall: () => _showComingSoon(context, 'Call'),
+                    onCall: () => _openDialer(context),
                     onMessage: () => _showComingSoon(context, 'Message'),
                     onWhatsApp: () => _showComingSoon(context, 'WhatsApp'),
                     onShare: () => _shareContact(context),
                     onCopyNumber: () => _copyNumber(context),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   _InfoSectionCard(
                     icon: Icons.person_outline,
                     title: 'Donor Information',
-                    child: _DonorInfoCombinedContent(contact: contact, red: red),
+                    child: _DonorInfoCombinedContent(
+                      contact: contact,
+                      red: red,
+                    ),
                   ),
-                  const SizedBox(height: 22),
-                  _DeleteButton(onDelete: onDelete),
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 14),
+                  _PrimaryActionsRow(onEdit: onEdit, onDelete: onDelete),
+                  const SizedBox(height: 14),
                   const _PrivacyFooter(),
                 ],
               ),
@@ -108,6 +112,16 @@ Remarks: $remarks
       context,
     ).showSnackBar(const SnackBar(content: Text('Phone number copied')));
   }
+
+  Future<void> _openDialer(BuildContext context) async {
+    final uri = Uri(scheme: 'tel', path: contact.phone);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not open dialer')));
+    }
+  }
 }
 
 class _DonorInfoCombinedContent extends StatelessWidget {
@@ -156,7 +170,7 @@ class _DetailsHeader extends StatelessWidget {
           tooltip: 'Back',
           onPressed: onBack,
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             children: [
@@ -165,11 +179,11 @@ class _DetailsHeader extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   color: Colors.black,
-                  fontSize: AppFontSizes.pageTitle,
+                  fontSize: AppFontSizes.sectionTitle,
                   height: 1.1,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               const Text(
                 'View donor information and details',
                 textAlign: TextAlign.center,
@@ -240,15 +254,15 @@ class _HeaderIconButtonShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 56,
-      height: 56,
+      width: 38,
+      height: 38,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _cardBorder),
         boxShadow: _softShadow,
       ),
-      child: Icon(icon, color: _bloodRed, size: 28),
+      child: Icon(icon, color: _bloodRed, size: 18),
     );
   }
 }
@@ -282,18 +296,18 @@ class _HeroCard extends StatelessWidget {
           children: [
             const Positioned(right: -18, top: 36, child: _BloodDrops()),
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
               child: Column(
                 children: [
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       _AvatarWithStatus(contact: contact, red: red),
-                      const SizedBox(width: 18),
+                      const SizedBox(width: 12),
                       Expanded(child: _HeroDetails(contact: contact)),
                     ],
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
@@ -303,7 +317,7 @@ class _HeroCard extends StatelessWidget {
                           onPressed: onCall,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: _ActionTile(
                           icon: Icons.message_outlined,
@@ -311,7 +325,7 @@ class _HeroCard extends StatelessWidget {
                           onPressed: onMessage,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: _ActionTile(
                           customIcon: const FaIcon(
@@ -323,7 +337,7 @@ class _HeroCard extends StatelessWidget {
                           onPressed: onWhatsApp,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: _ActionTile(
                           icon: Icons.share_outlined,
@@ -331,7 +345,7 @@ class _HeroCard extends StatelessWidget {
                           onPressed: onShare,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: _ActionTile(
                           icon: Icons.content_copy_outlined,
@@ -364,13 +378,13 @@ class _AvatarWithStatus extends StatelessWidget {
       children: [
         ContactAvatar(
           contact: contact,
-          radius: 50,
+          radius: 42,
           backgroundColor: const Color(0xffffdada),
           foregroundColor: red,
           border: Border.all(color: Colors.white, width: 5),
           textStyle: TextStyle(
             color: red,
-            fontSize: AppFontSizes.pageTitle + 4,
+            fontSize: AppFontSizes.pageTitle - 2,
             fontWeight: FontWeight.w900,
           ),
         ),
@@ -378,8 +392,8 @@ class _AvatarWithStatus extends StatelessWidget {
           right: 5,
           bottom: 5,
           child: Container(
-            width: 22,
-            height: 22,
+            width: 18,
+            height: 18,
             decoration: BoxDecoration(
               color: Colors.white,
               shape: BoxShape.circle,
@@ -420,10 +434,10 @@ class _HeroDetails extends StatelessWidget {
             height: 1.08,
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         Wrap(
-          spacing: 12,
-          runSpacing: 10,
+          spacing: 8,
+          runSpacing: 8,
           children: [
             _StatusPill(
               icon: Icons.water_drop_outlined,
@@ -434,9 +448,9 @@ class _HeroDetails extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 14),
-        _HeroMeta(icon: Icons.phone_outlined, text: _valueOrNA(contact.phone)),
         const SizedBox(height: 10),
+        _HeroMeta(icon: Icons.phone_outlined, text: _valueOrNA(contact.phone)),
+        const SizedBox(height: 8),
         _HeroMeta(
           icon: Icons.location_on_outlined,
           text: _valueOrNA(contact.area),
@@ -464,7 +478,7 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(12),
@@ -473,8 +487,8 @@ class _StatusPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: foreground, size: 20),
-          const SizedBox(width: 8),
+          Icon(icon, color: foreground, size: 16),
+          const SizedBox(width: 6),
           Text(
             _valueOrNA(label),
             style: TextStyle(
@@ -499,8 +513,8 @@ class _HeroMeta extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: _mutedText, size: 20),
-        const SizedBox(width: 12),
+        Icon(icon, color: _mutedText, size: 17),
+        const SizedBox(width: 8),
         Expanded(
           child: Text(
             text,
@@ -542,7 +556,7 @@ class _ActionTile extends StatelessWidget {
           onTap: onPressed,
           borderRadius: BorderRadius.circular(8),
           child: Container(
-            height: 54,
+            height: 46,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: _cardBorder),
@@ -553,7 +567,7 @@ class _ActionTile extends StatelessWidget {
             alignment: Alignment.center,
             child:
                 customIcon ??
-                Icon(icon ?? Icons.circle_outlined, color: _bloodRed, size: 22),
+                Icon(icon ?? Icons.circle_outlined, color: _bloodRed, size: 18),
           ),
         ),
       ),
@@ -575,15 +589,15 @@ class _InfoSectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(14),
       decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, color: _bloodRed, size: 28),
-              const SizedBox(width: 20),
+              Icon(icon, color: _bloodRed, size: 22),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   title,
@@ -596,7 +610,7 @@ class _InfoSectionCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 14),
           child,
         ],
       ),
@@ -682,9 +696,9 @@ class _DonorInformationGrid extends StatelessWidget {
           children: [
             Expanded(child: _DetailItem(data: items[index])),
             if (hasPair) ...[
-              const SizedBox(width: 26),
-              Container(width: 1, height: 58, color: _dividerColor),
-              const SizedBox(width: 26),
+              const SizedBox(width: 14),
+              Container(width: 1, height: 48, color: _dividerColor),
+              const SizedBox(width: 14),
               Expanded(child: _DetailItem(data: items[index + 1])),
             ] else
               const Expanded(child: SizedBox.shrink()),
@@ -721,8 +735,8 @@ class _DetailItem extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(data.icon, color: data.iconColor, size: 26),
-        const SizedBox(width: 18),
+        Icon(data.icon, color: data.iconColor, size: 18),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -735,7 +749,7 @@ class _DetailItem extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 7),
+              const SizedBox(height: 4),
               Text(
                 data.value,
                 style: const TextStyle(
@@ -759,7 +773,7 @@ class _RowDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 18),
+      padding: EdgeInsets.symmetric(vertical: 10),
       child: Divider(color: _dividerColor, height: 1),
     );
   }
@@ -781,6 +795,14 @@ class _AvailabilityTile extends StatelessWidget {
       ),
       child: Row(
         children: [
+          Icon(
+            contact.isAvailable
+                ? Icons.check_circle_outline
+                : Icons.block_outlined,
+            size: 16,
+            color: contact.isAvailable ? _successGreen : _bloodRed,
+          ),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -793,7 +815,7 @@ class _AvailabilityTile extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 3),
                 Text(
                   contact.availability.statusText,
                   style: const TextStyle(
@@ -855,28 +877,58 @@ class _MetadataLabel extends StatelessWidget {
   }
 }
 
-class _DeleteButton extends StatelessWidget {
-  const _DeleteButton({required this.onDelete});
+class _PrimaryActionsRow extends StatelessWidget {
+  const _PrimaryActionsRow({required this.onEdit, required this.onDelete});
 
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onDelete,
-      icon: const Icon(Icons.delete_outline, size: 28),
-      label: const Text('Delete Contact'),
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(74),
-        foregroundColor: _bloodRed,
-        textStyle: const TextStyle(
-          fontSize: AppFontSizes.buttonText,
-          fontWeight: FontWeight.w900,
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: onEdit,
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Edit'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              foregroundColor: const Color(0xff343741),
+              textStyle: const TextStyle(
+                fontSize: AppFontSizes.buttonText,
+                fontWeight: FontWeight.w900,
+              ),
+              side: const BorderSide(color: Color(0xffd8dbe3)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              backgroundColor: Colors.white,
+            ),
+          ),
         ),
-        side: const BorderSide(color: Color(0xffffbfc1)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        backgroundColor: const Color(0xfffff7f7),
-      ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: const Text('Delete'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              foregroundColor: _bloodRed,
+              textStyle: const TextStyle(
+                fontSize: AppFontSizes.buttonText,
+                fontWeight: FontWeight.w900,
+              ),
+              side: const BorderSide(color: Color(0xffffbfc1)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              backgroundColor: const Color(0xfffff7f7),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -890,7 +942,7 @@ class _PrivacyFooter extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Icon(Icons.lock_outline, color: _mutedText, size: 18),
-        SizedBox(width: 10),
+        SizedBox(width: 6),
         Flexible(
           child: Text(
             'Information is private and only visible to you',
