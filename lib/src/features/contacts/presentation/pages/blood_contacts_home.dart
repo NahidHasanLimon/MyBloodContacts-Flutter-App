@@ -36,7 +36,7 @@ class BloodContactsHome extends StatefulWidget {
 class _BloodContactsHomeState extends State<BloodContactsHome>
     with WidgetsBindingObserver {
   static const int _maxAutoSyncAttemptsPerDay = 3;
-  static const Duration _autoSyncRetryInterval = Duration(minutes: 30);
+  static const Duration _autoSyncRetryInterval = Duration(hours: 24);
 
   final _driveSyncService = GoogleDriveSyncService();
 
@@ -791,7 +791,7 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
         await _addSyncEventNotification(
           store: store,
           status: 'success',
-          title: 'Sync successful',
+          title: isAutoSync ? 'Auto-sync successful' : 'Sync successful',
           message:
               'Synced ${result.contactCount} contacts and ${result.needCount} needs.',
         );

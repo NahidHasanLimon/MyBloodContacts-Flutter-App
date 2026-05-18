@@ -324,14 +324,17 @@ class ContactsStore {
     if (enabledDay == today) return false;
 
     final attemptsToday = loadAutoSyncAttemptCountForDay(now);
-    if (attemptsToday == 0) return true;
-
-    final status = loadLastSyncStatus() ?? '';
-    if (status == 'success') return false;
     if (attemptsToday >= maxAttemptsPerDay) return false;
 
     final lastAttempt = loadLastAutoSyncAttemptAt();
     if (lastAttempt == null) return true;
+
+    final lastAttemptDay = _formatDayKey(lastAttempt);
+    if (lastAttemptDay != today) return true;
+
+    final status = loadLastSyncStatus() ?? '';
+    if (status == 'success') return false;
+
     return now.difference(lastAttempt) >= retryInterval;
   }
 

@@ -6,7 +6,7 @@ import 'package:workmanager/workmanager.dart';
 
 const String dailyAutoSyncTask = 'blood_contacts_daily_auto_sync';
 const _maxAutoSyncAttemptsPerDay = 3;
-const _autoSyncRetryInterval = Duration(minutes: 30);
+const _autoSyncRetryInterval = Duration(hours: 24);
 
 @pragma('vm:entry-point')
 void backgroundSyncCallbackDispatcher() {
