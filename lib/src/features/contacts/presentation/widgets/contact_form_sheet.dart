@@ -193,7 +193,8 @@ class _AddBloodContactBottomSheetState
     final compressedPhotoBytes = selectedPhotoBytes == null
         ? null
         : await _compressPhotoToLimit(selectedPhotoBytes);
-    final removedPhoto = selectedPhotoBytes != null && compressedPhotoBytes == null;
+    final removedPhoto =
+        selectedPhotoBytes != null && compressedPhotoBytes == null;
 
     setState(() {
       _manualMode = false;
@@ -281,11 +282,11 @@ class _AddBloodContactBottomSheetState
     }
 
     final existing = widget.contact;
-    final normalizedPhone = normalizedPhoneNumber(_phoneController.text.trim());
+    final storedPhone = sanitizedPhoneNumber(_phoneController.text.trim());
     final contact = BloodContact(
       id: existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
       name: donorName,
-      phone: normalizedPhone,
+      phone: storedPhone,
       email: _emailController.text.trim(),
       photoPath: _photoPath,
       photoBase64: _photoBytes == null ? null : base64Encode(_photoBytes!),
@@ -509,7 +510,7 @@ class _AddBloodContactBottomSheetState
         child: Material(
           color: Colors.white,
           child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(18, 10, 18, bottomPadding + 18),
+            padding: EdgeInsets.fromLTRB(16, 8, 16, bottomPadding + 14),
             child: Form(
               key: _formKey,
               autovalidateMode: _submitted
@@ -529,7 +530,7 @@ class _AddBloodContactBottomSheetState
                       ),
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
@@ -542,7 +543,7 @@ class _AddBloodContactBottomSheetState
                                   : 'Edit Blood Contact',
                               style: Theme.of(
                                 context,
-                              ).textTheme.titleLarge?.copyWith(fontSize: 28),
+                              ).textTheme.titleLarge?.copyWith(fontSize: 24),
                             ),
                             const SizedBox(height: 5),
                             Text(
@@ -564,21 +565,18 @@ class _AddBloodContactBottomSheetState
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 14),
                   if (!_isEditing) ...[
                     AddContactSegmentedControl(
                       manualMode: _manualMode,
                       onManual: () => setState(() => _manualMode = true),
-                      onContacts: () async {
-                        setState(() => _manualMode = false);
-                        await _selectPhoneContact();
-                      },
+                      onContacts: () => setState(() => _manualMode = false),
                     ),
-                    const SizedBox(height: 22),
+                    const SizedBox(height: 14),
                   ],
                   if (!_isEditing && !_manualMode)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 14),
+                      padding: const EdgeInsets.only(bottom: 10),
                       child: OutlinedButton.icon(
                         onPressed: _selectPhoneContact,
                         icon: const Icon(Icons.contacts_outlined),
@@ -592,7 +590,7 @@ class _AddBloodContactBottomSheetState
                     icon: Icons.person_outline,
                     validator: _requiredValidator('Name required'),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   AppTextField(
                     controller: _phoneController,
                     label: 'Phone number *',
@@ -604,7 +602,7 @@ class _AddBloodContactBottomSheetState
                       return _requiredValidator('Phone number required')(value);
                     },
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   AppDropdown<String>(
                     label: 'Blood Group *',
                     hint: 'Select blood group',
@@ -616,7 +614,7 @@ class _AddBloodContactBottomSheetState
                     validator: (value) =>
                         value == null ? 'Blood group required' : null,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   AppDropdown<DonorAvailability>(
                     label: 'Availability *',
                     hint: 'Select availability',
@@ -628,12 +626,12 @@ class _AddBloodContactBottomSheetState
                     validator: (value) =>
                         value == null ? 'Availability required' : null,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   DatePickerField(
                     value: _lastDonationDate,
                     onTap: _pickLastDonationDate,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   AppTextField(
                     controller: _emailController,
                     label: 'Email (optional)',
@@ -641,7 +639,7 @@ class _AddBloodContactBottomSheetState
                     icon: Icons.mail_outline,
                     keyboardType: TextInputType.emailAddress,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   AppTextField(
                     controller: _noteController,
                     label: 'Note (optional)',
@@ -650,7 +648,7 @@ class _AddBloodContactBottomSheetState
                     minLines: 2,
                     maxLines: 3,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   ProfilePhotoField(
                     photoBytes: _photoBytes,
                     photoName: _photoName,
@@ -658,7 +656,7 @@ class _AddBloodContactBottomSheetState
                     onPick: _pickImage,
                     onRemove: _removeImage,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   if (!_isEditing) ...[
                     Row(
                       children: [
@@ -680,11 +678,11 @@ class _AddBloodContactBottomSheetState
                         ),
                       ],
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 12),
                   ],
                   SizedBox(
                     width: double.infinity,
-                    height: 56,
+                    height: 50,
                     child: FilledButton(
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xffd90416),
@@ -739,11 +737,11 @@ class AddContactSegmentedControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 54,
-      padding: const EdgeInsets.all(4),
+      height: 48,
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: const Color(0xfff4f1f1),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
@@ -787,12 +785,12 @@ class SegmentButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(15),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected ? const Color(0xfffff6f6) : Colors.transparent,
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(12),
           border: selected
               ? Border.all(color: const Color(0xffff8b92), width: 1.4)
               : null,
@@ -802,12 +800,12 @@ class SegmentButton extends StatelessWidget {
           children: [
             Icon(
               icon,
-              size: 18,
+              size: 16,
               color: selected
                   ? const Color(0xffd90416)
                   : const Color(0xff66636a),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
@@ -922,7 +920,7 @@ class DatePickerField extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(12),
       child: InputDecorator(
         decoration: AppFieldDecoration.input(
           label: 'Last Donation Date (optional)',
@@ -966,36 +964,36 @@ class ProfilePhotoField extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: const Color(0xffe9e2e2)),
           ),
           child: Row(
             children: [
               const Icon(Icons.image_outlined, color: Color(0xff555560)),
-              const SizedBox(width: 14),
+              const SizedBox(width: 10),
               if (hasPhoto)
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(28),
+                  borderRadius: BorderRadius.circular(24),
                   child: Image.memory(
                     photoBytes!,
-                    width: 56,
-                    height: 56,
+                    width: 48,
+                    height: 48,
                     fit: BoxFit.cover,
                   ),
                 )
               else
                 const CircleAvatar(
-                  radius: 28,
+                  radius: 24,
                   backgroundColor: Color(0xffffeeee),
                   child: Icon(
                     Icons.cloud_upload_outlined,
                     color: Color(0xffd90416),
                   ),
                 ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1004,7 +1002,7 @@ class ProfilePhotoField extends StatelessWidget {
                       'Profile Photo (optional)',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 3),
                     Text(
                       hasPhoto ? photoName ?? 'Selected image' : 'Upload Image',
                       maxLines: 1,
@@ -1068,14 +1066,14 @@ class AppFieldDecoration {
       suffixIcon: suffixIcon == null ? null : Icon(suffixIcon),
       filled: true,
       fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xffe9e2e2)),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xffef6670)),
       ),
     );

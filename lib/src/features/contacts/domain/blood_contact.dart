@@ -144,11 +144,16 @@ int sortContacts(BloodContact a, BloodContact b) {
   return a.name.toLowerCase().compareTo(b.name.toLowerCase());
 }
 
-String normalizedPhoneNumber(String phone) {
+String sanitizedPhoneNumber(String phone) {
   var digits = phone.replaceAll(RegExp(r'\D'), '');
   if (digits.startsWith('00')) {
     digits = digits.substring(2);
   }
+  return digits;
+}
+
+String normalizedPhoneNumber(String phone) {
+  var digits = sanitizedPhoneNumber(phone);
   // Normalize Bangladesh mobile formats so +8801XXXXXXXXX, 8801XXXXXXXXX,
   // and 01XXXXXXXXX are treated as the same number.
   if (digits.startsWith('880') && digits.length >= 13) {

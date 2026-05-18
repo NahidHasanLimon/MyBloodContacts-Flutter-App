@@ -704,11 +704,11 @@ class NeedSyncRecord {
 }
 
 Map<String, Object?> _contactToRow(BloodContact contact) {
-  final normalizedPhone = normalizedPhoneNumber(contact.phone);
+  final storedPhone = sanitizedPhoneNumber(contact.phone);
   return {
     'id': contact.id,
     'name': contact.name,
-    'phone': normalizedPhone,
+    'phone': storedPhone,
     'email': contact.email,
     'photo_path': contact.photoPath,
     'photo_base64': contact.photoBase64,
@@ -724,11 +724,11 @@ Map<String, Object?> _contactToRow(BloodContact contact) {
 }
 
 BloodContact _contactFromRow(Map<String, Object?> row) {
-  final normalizedPhone = normalizedPhoneNumber(row['phone'] as String? ?? '');
+  final storedPhone = sanitizedPhoneNumber(row['phone'] as String? ?? '');
   return BloodContact(
     id: row['id'] as String,
     name: row['name'] as String,
-    phone: normalizedPhone,
+    phone: storedPhone,
     email: row['email'] as String? ?? '',
     photoPath: row['photo_path'] as String?,
     photoBase64: row['photo_base64'] as String?,

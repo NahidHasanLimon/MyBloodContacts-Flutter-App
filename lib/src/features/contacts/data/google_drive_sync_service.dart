@@ -182,6 +182,16 @@ class GoogleDriveSyncService {
     ].whereType<String>()) {
       await driveApi.files.delete(fileId);
     }
+    await driveApi.files.delete(folderId);
+  }
+
+  Future<void> disconnect() async {
+    await _ensureInitialized();
+    try {
+      await _googleSignIn.disconnect();
+    } catch (_) {
+      await _googleSignIn.signOut();
+    }
   }
 
   Future<GoogleSignInAccount?> _authenticate({

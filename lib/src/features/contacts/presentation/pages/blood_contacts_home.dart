@@ -351,7 +351,7 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
       });
       _showDriveSnackBar(
         title: 'Google Drive connected',
-        message: 'Backup is ready. Tap Sync Now when you want to upload.',
+        message: 'Your Google Drive is connected. You can now use it for backups and sync.',
         icon: Icons.check_circle,
         color: const Color(0xff119048),
       );
@@ -621,6 +621,18 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
     if (action == null) return;
     if (!mounted) return;
 
+    if (action == _DriveUnlinkAction.localOnly) {
+      final confirmed = await showAppConfirmationDialog(
+        context: context,
+        title: 'Unlink Google Drive?',
+        message:
+            'This will disconnect your Google Drive from this app on this device.',
+        confirmLabel: 'Unlink',
+      );
+      if (!mounted) return;
+      if (confirmed != true) return;
+    }
+
     if (action == _DriveUnlinkAction.removeCloudBackup) {
       final confirmed = await showAppConfirmationDialog(
         context: context,
@@ -629,6 +641,7 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
             'This will permanently delete your Blood Contacts backup from Google Drive.',
         confirmLabel: 'Delete backup',
       );
+      if (!mounted) return;
       if (confirmed != true) return;
 
       setState(() => _syncing = true);
@@ -654,6 +667,12 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
   }
 
   Future<void> _unlinkDriveLocally() async {
+    try {
+      await _driveSyncService.disconnect();
+    } catch (error, stackTrace) {
+      debugPrint('Google sign-out during unlink failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
     await _store?.clearDriveConnection();
     if (!mounted) return;
     setState(() {

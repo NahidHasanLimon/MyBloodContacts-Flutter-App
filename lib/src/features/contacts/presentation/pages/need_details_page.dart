@@ -249,7 +249,7 @@ class _NeedDetailsPageState extends State<NeedDetailsPage> {
         subject: 'Blood need: ${_need.bloodGroup}',
         text:
             '''
-Blood need request
+Blood donation request
 
 Patient: ${_need.patientName}
 Blood group: ${_need.bloodGroup}
@@ -257,7 +257,7 @@ Units needed: ${_need.units}
 Hospital: ${_need.hospital}
 Needed on: ${_need.date}, ${_need.time}
 Requested by: ${_need.requester}
-Contact: ${_need.contactPersonPhone}
+Contact person: ${_need.contactPersonPhone} (${_need.contactPersonName})
 Description: ${_need.summary}
 '''
                 .trim(),
@@ -271,7 +271,10 @@ Description: ${_need.summary}
   Future<void> _showPotentialDonors(BuildContext context) async {
     final matchingContacts =
         widget.contacts
-            .where((contact) => contact.bloodGroup == _need.bloodGroup)
+            .where(
+              (contact) =>
+                  contact.isAvailable && contact.bloodGroup == _need.bloodGroup,
+            )
             .toList()
           ..sort(sortContacts);
 
@@ -312,10 +315,14 @@ Description: ${_need.summary}
     );
     if (confirmed != true || !context.mounted) return;
 
+    final availableContacts =
+        widget.contacts.where((contact) => contact.isAvailable).toList()
+          ..sort(sortContacts);
+
     final donor = await showModalBottomSheet<BloodContact?>(
       context: context,
       showDragHandle: true,
-      builder: (context) => _DonorSelectionSheet(contacts: widget.contacts),
+      builder: (context) => _DonorSelectionSheet(contacts: availableContacts),
     );
     if (!context.mounted) return;
 

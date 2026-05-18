@@ -43,8 +43,8 @@ class DonorDetailsPage extends StatelessWidget {
                     contact: contact,
                     red: red,
                     onCall: () => _openDialer(context),
-                    onMessage: () => _showComingSoon(context, 'Message'),
-                    onWhatsApp: () => _showComingSoon(context, 'WhatsApp'),
+                    onMessage: () => _openMessenger(context),
+                    onWhatsApp: () => _openWhatsApp(context),
                     onShare: () => _shareContact(context),
                     onCopyNumber: () => _copyNumber(context),
                   ),
@@ -100,12 +100,6 @@ Remarks: $remarks
     );
   }
 
-  void _showComingSoon(BuildContext context, String label) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$label will be connected soon.')));
-  }
-
   void _copyNumber(BuildContext context) {
     Clipboard.setData(ClipboardData(text: _valueOrNA(contact.phone)));
     ScaffoldMessenger.of(
@@ -114,12 +108,46 @@ Remarks: $remarks
   }
 
   Future<void> _openDialer(BuildContext context) async {
+    final confirmed = await showAppConfirmationDialog(
+      context: context,
+      title: 'Call contact?',
+      message: 'Do you want to call ${contact.phone}?',
+      confirmLabel: 'Call',
+      destructive: false,
+    );
+    if (confirmed != true || !context.mounted) return;
+
     final uri = Uri(scheme: 'tel', path: contact.phone);
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && context.mounted) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Could not open dialer')));
+    }
+  }
+
+  Future<void> _openMessenger(BuildContext context) async {
+    final uri = Uri(scheme: 'smsto', path: contact.phone);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not open messages')));
+    }
+  }
+
+  Future<void> _openWhatsApp(BuildContext context) async {
+    final phoneForWhatsApp = contact.phone.replaceAll(RegExp(r'\D'), '');
+    final directUri = Uri.parse('whatsapp://send?phone=$phoneForWhatsApp');
+    var opened = await launchUrl(directUri, mode: LaunchMode.externalApplication);
+    if (!opened) {
+      final webFallback = Uri.parse('https://wa.me/$phoneForWhatsApp');
+      opened = await launchUrl(webFallback, mode: LaunchMode.externalApplication);
+    }
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
     }
   }
 }
