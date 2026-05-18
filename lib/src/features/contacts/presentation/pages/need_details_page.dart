@@ -567,11 +567,7 @@ class _NeedSummaryCard extends StatelessWidget {
             icon: Icons.person_outline,
             label: 'Contact Person',
             title: need.contactPersonName,
-            trailing: _PhoneTrailing(
-              phone: need.contactPersonPhone,
-              showNumber: false,
-            ),
-            subtitle: need.contactPersonPhone,
+            subtitleWidget: _PhoneTrailing(phone: need.contactPersonPhone),
           ),
           const _SectionDivider(),
           Row(
@@ -601,8 +597,7 @@ class _NeedSummaryCard extends StatelessWidget {
             labelTrailing: _MetadataValue(
               value: _formatRequestedDate(need.updatedAt),
             ),
-            trailing: _PhoneTrailing(phone: need.phone, showNumber: false),
-            subtitle: need.phone,
+            subtitleWidget: _PhoneTrailing(phone: need.phone),
           ),
           const _SectionDivider(),
           _DetailRow(
@@ -619,27 +614,24 @@ class _NeedSummaryCard extends StatelessWidget {
 }
 
 class _PhoneTrailing extends StatelessWidget {
-  const _PhoneTrailing({required this.phone, this.showNumber = true});
+  const _PhoneTrailing({required this.phone});
 
   final String phone;
-  final bool showNumber;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (showNumber) ...[
-          Text(
-            phone,
-            style: const TextStyle(
-              color: Color(0xff343741),
-              fontSize: AppFontSizes.bodyText,
-              fontWeight: FontWeight.w700,
-            ),
+        Text(
+          phone,
+          style: const TextStyle(
+            color: Color(0xff343741),
+            fontSize: AppFontSizes.bodyText,
+            fontWeight: FontWeight.w700,
           ),
-          const SizedBox(width: 8),
-        ],
+        ),
+        const SizedBox(width: 8),
         SizedBox(
           width: 28,
           height: 28,
@@ -1163,7 +1155,7 @@ class _DetailRow extends StatelessWidget {
     required this.label,
     required this.title,
     this.subtitle,
-    this.trailing,
+    this.subtitleWidget,
     this.labelTrailing,
   });
 
@@ -1171,7 +1163,7 @@ class _DetailRow extends StatelessWidget {
   final String label;
   final String title;
   final String? subtitle;
-  final Widget? trailing;
+  final Widget? subtitleWidget;
   final Widget? labelTrailing;
 
   @override
@@ -1205,7 +1197,6 @@ class _DetailRow extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
                     child: Text(
@@ -1220,13 +1211,12 @@ class _DetailRow extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (trailing != null) ...[
-                    const SizedBox(width: 14),
-                    trailing!,
-                  ],
                 ],
               ),
-              if (subtitle != null) ...[
+              if (subtitleWidget != null) ...[
+                const SizedBox(height: 6),
+                subtitleWidget!,
+              ] else if (subtitle != null) ...[
                 const SizedBox(height: 6),
                 Text(
                   subtitle!,
