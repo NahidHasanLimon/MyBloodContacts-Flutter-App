@@ -56,7 +56,7 @@ class ProfilePage extends StatelessWidget {
     final lastSyncedAt = syncHistory.isEmpty ? null : syncHistory.first.at;
 
     return ColoredBox(
-      color: const Color(0xfffffbf7),
+      color: Colors.white,
       child: SafeArea(
         child: CustomScrollView(
           slivers: [
@@ -199,8 +199,8 @@ class _ProfileHeader extends StatelessWidget {
               Text(
                 'Profile',
                 style: TextStyle(
-                  color: Color(0xff201716),
-                  fontSize: 30,
+                  color: Colors.black,
+                  fontSize: 28,
                   height: 1.1,
                   fontWeight: FontWeight.w900,
                 ),
@@ -258,11 +258,6 @@ class _HeaderIconButton extends StatelessWidget {
         child: Container(
           width: 44,
           height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(15),
-            border: Border.all(color: const Color(0xffffe1d7)),
-          ),
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -794,10 +789,8 @@ class ProfileSyncHistoryPage extends StatelessWidget {
       ..sort((a, b) => b.at.compareTo(a.at));
 
     return Scaffold(
-      backgroundColor: const Color(0xfffffbf7),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xfffffbf7),
-        surfaceTintColor: Colors.transparent,
         title: const Text(
           'Sync History',
           style: TextStyle(fontWeight: FontWeight.w900),
@@ -869,10 +862,8 @@ class _ProfilePermissionsPageState extends State<ProfilePermissionsPage> {
     final contactsStatus = _contactsStatus;
 
     return Scaffold(
-      backgroundColor: const Color(0xfffffbf7),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xfffffbf7),
-        surfaceTintColor: Colors.transparent,
         title: const Text(
           'Permissions',
           style: TextStyle(fontWeight: FontWeight.w900),
@@ -930,10 +921,8 @@ class ProfileAboutPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xfffffbf7),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xfffffbf7),
-        surfaceTintColor: Colors.transparent,
         title: const Text(
           'About Blood Contacts',
           style: TextStyle(fontWeight: FontWeight.w900),
@@ -963,10 +952,8 @@ class ProfilePrivacyDataPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xfffffbf7),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xfffffbf7),
-        surfaceTintColor: Colors.transparent,
         title: const Text(
           'Privacy & Data',
           style: TextStyle(fontWeight: FontWeight.w900),

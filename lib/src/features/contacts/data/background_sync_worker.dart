@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
 const String dailyAutoSyncTask = 'blood_contacts_daily_auto_sync';
+const _maxAutoSyncAttemptsPerDay = 3;
+const _autoSyncRetryInterval = Duration(minutes: 30);
 
 @pragma('vm:entry-point')
 void backgroundSyncCallbackDispatcher() {
@@ -19,26 +21,37 @@ void backgroundSyncCallbackDispatcher() {
     if (!autoSyncEnabled) return true;
 
     final now = DateTime.now();
-    await store.saveLastAutoSyncAttemptAt(now);
+    if (!store.canAttemptAutoSyncNow(
+      now,
+      maxAttemptsPerDay: _maxAutoSyncAttemptsPerDay,
+      retryInterval: _autoSyncRetryInterval,
+    )) {
+      return true;
+    }
+    await store.recordAutoSyncAttempt(now);
     final connectivity = await Connectivity().checkConnectivity();
     if (connectivity.contains(ConnectivityResult.none)) {
+      const reason = 'No internet connection.';
       await store.addSyncHistory(
         now,
         status: 'failed',
-        message: 'No internet connection.',
+        message: reason,
       );
       await store.saveLastSyncStatus('failed');
+      await _notifyAutoSyncFailure(store, reason, now);
       return true;
     }
 
     final driveFolder = store.loadDriveFolder()?.trim();
     if (driveFolder == null || driveFolder.isEmpty) {
+      const reason = 'Google Drive not connected.';
       await store.addSyncHistory(
         now,
         status: 'cancelled',
-        message: 'Google Drive not connected.',
+        message: reason,
       );
       await store.saveLastSyncStatus('cancelled');
+      await _notifyAutoSyncFailure(store, reason, now, cancelled: true);
       return true;
     }
 
@@ -57,6 +70,7 @@ void backgroundSyncCallbackDispatcher() {
         needCount: result.needCount,
       );
       await store.saveLastSyncStatus('success');
+      await store.resetAutoSyncAttemptTracking(now);
 
       final notifySyncEvents = store.loadNotifySyncEventsEnabled();
       if (notifySyncEvents) {
@@ -77,10 +91,11 @@ void backgroundSyncCallbackDispatcher() {
           lower.contains('timeout') ||
           lower.contains('timed out');
       final status = terminated ? 'terminated' : 'failed';
+      final reason = _syncUserMessage(message);
       await store.addSyncHistory(
         now,
         status: status,
-        message: _syncUserMessage(message),
+        message: reason,
       );
       await store.saveLastSyncStatus(status);
       final notifySyncEvents = store.loadNotifySyncEventsEnabled();
@@ -90,7 +105,7 @@ void backgroundSyncCallbackDispatcher() {
         await store.upsertNotification(
           code: 'sync_${status}_${now.microsecondsSinceEpoch}',
           title: terminated ? 'Auto-sync terminated' : 'Auto-sync failed',
-          message: _syncUserMessage(message),
+          message: reason,
           createdAt: now,
         );
       }
@@ -104,10 +119,35 @@ void backgroundSyncCallbackDispatcher() {
           createdAt: now,
         );
       }
+      await _notifyAutoSyncFailure(
+        store,
+        reason,
+        now,
+        terminated: terminated,
+      );
     }
 
     return true;
   });
+}
+
+Future<void> _notifyAutoSyncFailure(
+  ContactsStore store,
+  String reason,
+  DateTime now, {
+  bool cancelled = false,
+  bool terminated = false,
+}) async {
+  await store.upsertNotification(
+    code: 'auto_sync_failed_${now.microsecondsSinceEpoch}',
+    title: cancelled
+        ? 'Auto-sync cancelled'
+        : terminated
+        ? 'Auto-sync terminated'
+        : 'Auto-sync failed',
+    message: reason,
+    createdAt: now,
+  );
 }
 
 String _syncUserMessage(String rawMessage) {

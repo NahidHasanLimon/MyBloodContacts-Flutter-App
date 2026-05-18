@@ -1029,7 +1029,7 @@ String _formatFullDate(DateTime? date) {
 const _bloodRed = Color(0xffe5161d);
 const _successGreen = Color(0xff0e9f3f);
 const _mutedText = Color(0xff3f4254);
-const _pageBackground = Color(0xfffbfaf8);
+const _pageBackground = Colors.white;
 const _cardBorder = Color(0xffffdedf);
 const _dividerColor = Color(0xffffe5e5);
 

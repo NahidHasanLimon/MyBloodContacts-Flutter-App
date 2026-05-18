@@ -35,6 +35,9 @@ class BloodContactsHome extends StatefulWidget {
 
 class _BloodContactsHomeState extends State<BloodContactsHome>
     with WidgetsBindingObserver {
+  static const int _maxAutoSyncAttemptsPerDay = 3;
+  static const Duration _autoSyncRetryInterval = Duration(minutes: 30);
+
   final _driveSyncService = GoogleDriveSyncService();
 
   ContactsStore? _store;
@@ -666,6 +669,7 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
   Future<void> _syncData({
     bool allowInteractiveAuth = false,
     bool showFeedback = true,
+    bool isAutoSync = false,
   }) async {
     if (_syncing || _syncActionInFlight) return;
     _syncActionInFlight = true;
@@ -674,12 +678,16 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
       if (!hasConnection) {
         final store = _store;
         if (store != null) {
+          final now = DateTime.now();
           await store.addSyncHistory(
-            DateTime.now(),
+            now,
             status: 'failed',
             message: 'No internet connection.',
           );
           await store.saveLastSyncStatus('failed');
+          if (isAutoSync) {
+            await _notifyAutoSyncFailure(store, now, 'No internet connection.');
+          }
           await _refreshNotifications();
           if (mounted) {
             setState(() {
@@ -700,12 +708,21 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
       if (folder == null || folder.isEmpty) {
         final store = _store;
         if (store != null) {
+          final now = DateTime.now();
           await store.saveLastSyncStatus('cancelled');
           await store.addSyncHistory(
-            DateTime.now(),
+            now,
             status: 'cancelled',
             message: 'Google Drive not connected.',
           );
+          if (isAutoSync) {
+            await _notifyAutoSyncFailure(
+              store,
+              now,
+              'Google Drive not connected.',
+              cancelled: true,
+            );
+          }
           await _refreshNotifications();
           if (mounted) {
             setState(() {
@@ -740,6 +757,9 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
           needCount: result.needCount,
         );
         await store.saveLastSyncStatus('success');
+        if (isAutoSync) {
+          await store.resetAutoSyncAttemptTracking(syncedAt);
+        }
         final accountEmail = result.accountEmail?.trim();
         if (accountEmail != null && accountEmail.isNotEmpty) {
           await store.saveDriveEmail(accountEmail);
@@ -794,12 +814,22 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
             : terminated
             ? 'terminated'
             : 'failed';
+        final failedAt = DateTime.now();
         await store.addSyncHistory(
-          DateTime.now(),
+          failedAt,
           status: status,
           message: notificationMessage,
         );
         await store.saveLastSyncStatus(status);
+        if (isAutoSync) {
+          await _notifyAutoSyncFailure(
+            store,
+            failedAt,
+            notificationMessage,
+            cancelled: cancelled,
+            terminated: terminated,
+          );
+        }
         await _addSyncEventNotification(
           store: store,
           status: status,
@@ -866,16 +896,30 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
     );
   }
 
+  Future<void> _notifyAutoSyncFailure(
+    ContactsStore store,
+    DateTime at,
+    String reason, {
+    bool cancelled = false,
+    bool terminated = false,
+  }) async {
+    await store.upsertNotification(
+      code: 'auto_sync_failed_${at.microsecondsSinceEpoch}',
+      title: cancelled
+          ? 'Auto-sync cancelled'
+          : terminated
+          ? 'Auto-sync terminated'
+          : 'Auto-sync failed',
+      message: reason,
+      createdAt: at,
+    );
+  }
+
   void _scheduleDailyAutoSync() {
     _autoSyncTimer?.cancel();
     if (!_autoSyncEnabled) return;
-
-    final now = DateTime.now();
-    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
-    final delay = nextMidnight.difference(now);
-    _autoSyncTimer = Timer(delay, () async {
+    _autoSyncTimer = Timer.periodic(_autoSyncRetryInterval, (_) async {
       await _runAutoSyncIfDue();
-      _scheduleDailyAutoSync();
     });
   }
 
@@ -885,7 +929,7 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
     await Workmanager().registerPeriodicTask(
       dailyAutoSyncTask,
       dailyAutoSyncTask,
-      frequency: const Duration(hours: 24),
+      frequency: _autoSyncRetryInterval,
       constraints: Constraints(networkType: NetworkType.connected),
       existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
     );
@@ -896,14 +940,16 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
     if (store == null || !_autoSyncEnabled || _syncing) return;
 
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final lastAttempt = store.loadLastAutoSyncAttemptAt();
-    final alreadyAttemptedToday =
-        lastAttempt != null && !lastAttempt.isBefore(today);
-    if (alreadyAttemptedToday) return;
+    if (!store.canAttemptAutoSyncNow(
+      now,
+      maxAttemptsPerDay: _maxAutoSyncAttemptsPerDay,
+      retryInterval: _autoSyncRetryInterval,
+    )) {
+      return;
+    }
 
-    await store.saveLastAutoSyncAttemptAt(now);
-    await _syncData(showFeedback: false);
+    await store.recordAutoSyncAttempt(now);
+    await _syncData(showFeedback: false, isAutoSync: true);
   }
 
   Future<bool> _hasInternetConnection() async {
@@ -1274,6 +1320,9 @@ class _BloodContactsHomeState extends State<BloodContactsHome>
         onDisconnectDrive: _showDriveUnlinkOptions,
         onAutoSyncChanged: (value) async {
           await _store?.saveAutoSyncEnabled(value);
+          if (value) {
+            await _store?.markAutoSyncEnabledAt(DateTime.now());
+          }
           if (!mounted) return;
           setState(() => _autoSyncEnabled = value);
           _scheduleDailyAutoSync();

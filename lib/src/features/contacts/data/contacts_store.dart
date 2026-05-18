@@ -27,6 +27,10 @@ class ContactsStore {
   static const _autoSyncEnabledKey = 'blood_contacts.auto_sync_enabled';
   static const _lastAutoSyncAttemptAtKey =
       'blood_contacts.last_auto_sync_attempt_at';
+  static const _autoSyncEnabledDayKey = 'blood_contacts.auto_sync_enabled_day';
+  static const _autoSyncAttemptDayKey = 'blood_contacts.auto_sync_attempt_day';
+  static const _autoSyncAttemptCountKey =
+      'blood_contacts.auto_sync_attempt_count';
   static const _notifySyncFailedKey = 'blood_contacts.notify_sync_failed';
   static const _notifySyncStaleKey = 'blood_contacts.notify_sync_stale';
   static const _notifySyncEventsKey = 'blood_contacts.notify_sync_events';
@@ -274,6 +278,10 @@ class ContactsStore {
     return _prefs.setBool(_autoSyncEnabledKey, enabled);
   }
 
+  Future<void> markAutoSyncEnabledAt(DateTime at) {
+    return _prefs.setString(_autoSyncEnabledDayKey, _formatDayKey(at));
+  }
+
   DateTime? loadLastAutoSyncAttemptAt() {
     final raw = _prefs.getString(_lastAutoSyncAttemptAtKey);
     return raw == null ? null : DateTime.tryParse(raw);
@@ -281,6 +289,57 @@ class ContactsStore {
 
   Future<void> saveLastAutoSyncAttemptAt(DateTime at) {
     return _prefs.setString(_lastAutoSyncAttemptAtKey, at.toIso8601String());
+  }
+
+  int loadAutoSyncAttemptCountForDay(DateTime day) {
+    final storedDay = _prefs.getString(_autoSyncAttemptDayKey);
+    final expectedDay = _formatDayKey(day);
+    if (storedDay != expectedDay) return 0;
+    return _prefs.getInt(_autoSyncAttemptCountKey) ?? 0;
+  }
+
+  Future<void> recordAutoSyncAttempt(DateTime at) async {
+    final storedDay = _prefs.getString(_autoSyncAttemptDayKey);
+    final expectedDay = _formatDayKey(at);
+    final currentCount = storedDay == expectedDay
+        ? (_prefs.getInt(_autoSyncAttemptCountKey) ?? 0)
+        : 0;
+    await _prefs.setString(_autoSyncAttemptDayKey, expectedDay);
+    await _prefs.setInt(_autoSyncAttemptCountKey, currentCount + 1);
+    await saveLastAutoSyncAttemptAt(at);
+  }
+
+  Future<void> resetAutoSyncAttemptTracking(DateTime at) async {
+    await _prefs.setString(_autoSyncAttemptDayKey, _formatDayKey(at));
+    await _prefs.setInt(_autoSyncAttemptCountKey, 0);
+  }
+
+  bool canAttemptAutoSyncNow(
+    DateTime now, {
+    int maxAttemptsPerDay = 3,
+    Duration retryInterval = const Duration(minutes: 30),
+  }) {
+    final enabledDay = _prefs.getString(_autoSyncEnabledDayKey);
+    final today = _formatDayKey(now);
+    if (enabledDay == today) return false;
+
+    final attemptsToday = loadAutoSyncAttemptCountForDay(now);
+    if (attemptsToday == 0) return true;
+
+    final status = loadLastSyncStatus() ?? '';
+    if (status == 'success') return false;
+    if (attemptsToday >= maxAttemptsPerDay) return false;
+
+    final lastAttempt = loadLastAutoSyncAttemptAt();
+    if (lastAttempt == null) return true;
+    return now.difference(lastAttempt) >= retryInterval;
+  }
+
+  String _formatDayKey(DateTime date) {
+    final year = date.year.toString().padLeft(4, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
   }
 
   bool loadNotifySyncFailedEnabled() =>

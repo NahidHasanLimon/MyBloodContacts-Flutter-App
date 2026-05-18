@@ -42,7 +42,7 @@ class _NeedDetailsPageState extends State<NeedDetailsPage> {
         _need.status == NeedStatus.cancelled;
 
     return Scaffold(
-      backgroundColor: const Color(0xfffbfaf8),
+      backgroundColor: Colors.white,
       body: SafeArea(
         child: CustomScrollView(
           slivers: [

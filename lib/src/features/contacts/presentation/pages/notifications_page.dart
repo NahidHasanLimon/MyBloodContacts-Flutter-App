@@ -96,14 +96,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: item.isRead
-                          ? Colors.white
-                          : const Color(0xfffff6f7),
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: item.isRead
                             ? const Color(0xffece7e5)
-                            : const Color(0xffffd8db),
+                            : const Color(0xffd8e5ff),
                       ),
                     ),
                     child: Column(
@@ -126,7 +124,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               const Icon(
                                 Icons.fiber_manual_record,
                                 size: 10,
-                                color: Color(0xffe5161d),
+                                color: Color(0xff3b82f6),
                               ),
                           ],
                         ),
